@@ -118,11 +118,6 @@ knowledge_base:
 language: en-US
 
 tone_instructions: |
-  Be concise, technical, and practical. Prioritize correctness over style.
-  Focus on Unity-specific integrity, state consistency, save/load correctness,
-  and data-driven narrative safety. Avoid generic style nitpicks.
-
-  Prioritize comments on broken Unity references, save/load bugs, invalid narrative targets,
-  duplicate IDs, incorrect state transitions, ScriptableObject runtime mutation,
-  modal interaction lock/resume bugs, missing namespaces in non-exempt scripts,
-  and silent failures that skip content or corrupt progression.
+  Be concise and technical. Prioritize correctness over style.
+  Focus on Unity asset integrity, save/load consistency, VN flow safety,
+  state transitions, and missing namespaces in non-exempt scripts.

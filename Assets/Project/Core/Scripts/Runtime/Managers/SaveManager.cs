@@ -108,10 +108,11 @@ namespace Project.Core.Runtime.Managers
             if (Services.TryGet<BranchManager>(out var branchManager)) branchManager.LoadState(data.branch);
             if (Services.TryGet<EvidenceManager>(out var evidenceManager)) evidenceManager.LoadState(data.evidence);
 
+            var hasVnDirector = Services.TryGet<VNDirector>(out var vnDirector);
             var isVisualNovelState = data.currentState == GameState.VisualNovel;
             if (isVisualNovelState)
             {
-                if (Services.TryGet<VNDirector>(out var vnDirector))
+                if (hasVnDirector)
                 {
                     vnDirector.LoadState(data.visualNovel);
                 }
@@ -122,6 +123,11 @@ namespace Project.Core.Runtime.Managers
                 }
 
                 return;
+            }
+
+            if (hasVnDirector)
+            {
+                vnDirector.LoadState(new VNSaveData { isPlaying = false });
             }
 
             if (Services.TryGet<GameManager>(out var gameManager))

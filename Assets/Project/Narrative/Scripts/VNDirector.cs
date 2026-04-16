@@ -102,7 +102,7 @@ namespace Project.Narrative.Scripts
             await PlayNode(nodeId, new HashSet<string>());
         }
 
-        private async UniTask PlayNode(string nodeId, HashSet<string> visitedNodeIdsInChain)
+        private async UniTask PlayNode(string nodeId, HashSet<string> visitedNodeIdsInChain, bool suppressAutoContinue = false)
         {
             if (currentSequence == null)
             {
@@ -142,7 +142,7 @@ namespace Project.Narrative.Scripts
                 var fallbackNodeId = !string.IsNullOrWhiteSpace(currentNode.elseNodeId)
                     ? currentNode.elseNodeId
                     : GetNextNodeId(currentNode);
-                await PlayNode(fallbackNodeId, visitedNodeIdsInChain);
+                await PlayNode(fallbackNodeId, visitedNodeIdsInChain, suppressAutoContinue);
                 return;
             }
 
@@ -154,7 +154,7 @@ namespace Project.Narrative.Scripts
             isWaitingForExternalSignal = currentNode.waitForExternalSignal;
             isLineFullyDisplayed = false;
 
-            if (currentNode.autoContinue && !isWaitingForChoice && !isWaitingForExternalSignal)
+            if (!suppressAutoContinue && currentNode.autoContinue && !isWaitingForChoice && !isWaitingForExternalSignal)
             {
                 await UniTask.Delay((int)(Mathf.Max(0f, currentNode.autoContinueDelay) * 1000f));
                 await Advance();
@@ -215,6 +215,11 @@ namespace Project.Narrative.Scripts
 
         public async UniTask NotifyExternalAdvanceReady()
         {
+            if (!isPlaying || !isWaitingForExternalSignal)
+            {
+                return;
+            }
+
             isWaitingForExternalSignal = false;
             await Advance();
         }
@@ -247,11 +252,7 @@ namespace Project.Narrative.Scripts
 
             if (data == null || !data.isPlaying)
             {
-                currentChapter = null;
-                currentSequence = null;
-                currentNode = null;
-                isPlaying = false;
-                bridge.ExitVisualNovelState();
+                ClearChapterState(runEndAction: false);
                 return;
             }
 
@@ -259,7 +260,7 @@ namespace Project.Narrative.Scripts
             if (chapter == null)
             {
                 Debug.LogWarning($"VN chapter not found while loading: {data.chapterId}");
-                EndChapter();
+                ClearChapterState(runEndAction: false);
                 return;
             }
 
@@ -278,7 +279,14 @@ namespace Project.Narrative.Scripts
                 return;
             }
 
-            await PlayNode(string.IsNullOrWhiteSpace(nodeId) ? GetFirstEligibleNodeId(currentSequence) : nodeId);
+            var targetNodeId = string.IsNullOrWhiteSpace(nodeId) ? GetFirstEligibleNodeId(currentSequence) : nodeId;
+            await PlayNode(targetNodeId, new HashSet<string>(), suppressAutoContinue: true);
+
+            if (!isPlaying || currentNode == null || currentNode.nodeId != targetNodeId)
+            {
+                return;
+            }
+
             isLineFullyDisplayed = true;
             bridge.CompleteLine();
             if (isWaitingForChoice)
@@ -306,6 +314,12 @@ namespace Project.Narrative.Scripts
 
         private void EndChapter()
         {
+            ClearChapterState(runEndAction: true);
+        }
+
+        private void ClearChapterState(bool runEndAction)
+        {
+            var endAction = runEndAction && currentChapter != null ? currentChapter.EndAction : null;
             isPlaying = false;
             isWaitingForChoice = false;
             isWaitingForExternalSignal = false;
@@ -313,8 +327,12 @@ namespace Project.Narrative.Scripts
             currentSequence = null;
             currentNode = null;
             bridge.ExitVisualNovelState();
-            HandleEndAction(currentChapter != null ? currentChapter.EndAction : null).Forget();
             currentChapter = null;
+
+            if (endAction != null)
+            {
+                HandleEndAction(endAction).Forget();
+            }
         }
 
         private async UniTask HandleEndAction(VNEndAction endAction)

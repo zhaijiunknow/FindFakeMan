@@ -87,7 +87,10 @@ namespace Project.Core.Runtime.Managers
             {
                 if (choice != null && choice.ChoiceId == choiceId)
                 {
-                    onVnChoiceSelected.Invoke(choiceId);
+                    var callback = onVnChoiceSelected;
+                    currentVnChoices.Clear();
+                    onVnChoiceSelected = null;
+                    callback.Invoke(choiceId);
                     return;
                 }
             }
