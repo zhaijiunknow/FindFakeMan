@@ -45,6 +45,19 @@ namespace Project.Core.Runtime.Managers
             {
                 uiManager.ShowInspector(interactable.AssociatedItem, interactable);
             }
+
+            var sampleRule = interactable.GetComponent<SampleInteractableRule>();
+            if (sampleRule != null && sampleRule.ResolveOnClick)
+            {
+                if (sampleRule.TryResolveFromClick())
+                {
+                    OnActionExecuted(ActionResult.Success);
+                }
+                else
+                {
+                    OnActionExecuted(ActionResult.Invalid);
+                }
+            }
         }
 
         public void OnToolDragStarted(ToolItem toolItem, Vector2 position)
@@ -75,6 +88,13 @@ namespace Project.Core.Runtime.Managers
             if (!CanUseToolOn(interactable, toolItem))
             {
                 OnActionExecuted(ActionResult.Invalid);
+                return;
+            }
+
+            var sampleRule = interactable.GetComponent<SampleInteractableRule>();
+            if (sampleRule != null)
+            {
+                OnActionExecuted(sampleRule.TryResolveWithTool(toolItem) ? ActionResult.Success : ActionResult.Invalid);
                 return;
             }
 
