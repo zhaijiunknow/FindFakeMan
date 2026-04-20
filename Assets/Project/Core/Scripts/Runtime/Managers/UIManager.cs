@@ -5,7 +5,6 @@ using UnityEngine;
 using Project.Gameplay.Scripts.Interactables;
 using Project.Gameplay.Scripts.Items;
 using Project.Narrative.Scripts;
-using Project.Samples.Stage2Breach.Scripts;
 
 namespace Project.Core.Runtime.Managers
 {
@@ -17,10 +16,10 @@ namespace Project.Core.Runtime.Managers
         private Action<string> onVnChoiceSelected;
         private readonly List<VNChoiceViewData> currentVnChoices = new();
 
-        private Stage2BreachSceneUiView sceneUi;
-        private Stage2BreachToolInput toolInput;
-        private Stage2BreachSceneUiView SceneUi =>sceneUi != null ? sceneUi : (sceneUi = UnityEngine.Object.FindFirstObjectByType<Stage2BreachSceneUiView>());
-        private Stage2BreachToolInput ToolInput =>toolInput != null ? toolInput : (toolInput = UnityEngine.Object.FindFirstObjectByType<Stage2BreachToolInput>());
+        private ISceneUiView sceneUi;
+        private IToolInputService toolInput;
+        private ISceneUiView SceneUi => sceneUi != null ? sceneUi : (Services.TryGet<ISceneUiView>(out var service) ? sceneUi = service : null);
+        private IToolInputService ToolInput => toolInput != null ? toolInput : (Services.TryGet<IToolInputService>(out var service) ? toolInput = service : null);
         public void ShowPanel(string panelId)
         {
             OnPanelShown?.Invoke(panelId);

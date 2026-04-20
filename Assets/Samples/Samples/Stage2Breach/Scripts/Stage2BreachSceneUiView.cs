@@ -10,7 +10,7 @@ using UnityEngine.UI;
 
 namespace Project.Samples.Stage2Breach.Scripts
 {
-    public sealed class Stage2BreachSceneUiView : MonoBehaviour
+    public sealed class Stage2BreachSceneUiView : MonoBehaviour, ISceneUiView
     {
         [SerializeField] private GameObject vnPanel;
         [SerializeField] private Text vnSpeakerText;
@@ -36,7 +36,7 @@ namespace Project.Samples.Stage2Breach.Scripts
         [SerializeField] private Text inspectorBodyText;
 
         private readonly List<string> currentChoiceIds = new();
-        private Stage2BreachToolInput toolInput;
+        private IToolInputService toolInput;
         private Color defaultResultColor;
         private bool hasResultColor;
         private Color defaultToolDragColor;
@@ -44,7 +44,9 @@ namespace Project.Samples.Stage2Breach.Scripts
 
         private void Awake()
         {
-            toolInput = FindFirstObjectByType<Stage2BreachToolInput>();
+            Services.Register<ISceneUiView>(this);
+            Services.TryGet<IToolInputService>(out toolInput);
+            BindChoiceButtons();
             BindToolButtons();
             HideChoices();
             SetVnVisible(false);
@@ -68,6 +70,11 @@ namespace Project.Samples.Stage2Breach.Scripts
                 toolDragIndicator.enabled = false;
                 toolDragIndicator.raycastTarget = false;
             }
+        }
+
+        private void OnDestroy()
+        {
+            Services.UnregisterInstance(this);
         }
 
         private void Update()
@@ -261,7 +268,7 @@ namespace Project.Samples.Stage2Breach.Scripts
             }
         }
 
-        public void SetToolbar(ToolItem[] tools, int selectedSlot)
+        public void SetToolbar(IReadOnlyList<ToolItem> tools, int selectedSlot)
         {
             if (toolbarPanel != null)
             {
@@ -275,7 +282,7 @@ namespace Project.Samples.Stage2Breach.Scripts
 
             for (var i = 0; i < toolButtons.Length; i++)
             {
-                var tool = tools != null && i < tools.Length ? tools[i] : null;
+                var tool = tools != null && i < tools.Count ? tools[i] : null;
                 if (toolButtonTexts.Length > i && toolButtonTexts[i] != null)
                 {
                     toolButtonTexts[i].text = tool != null
@@ -318,6 +325,27 @@ namespace Project.Samples.Stage2Breach.Scripts
             SetInspectorVisible(false);
         }
 
+        private void BindChoiceButtons()
+        {
+            if (choiceButtons == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < choiceButtons.Length; i++)
+            {
+                var choiceIndex = i;
+                var button = choiceButtons[i];
+                if (button == null)
+                {
+                    continue;
+                }
+
+                button.onClick.RemoveAllListeners();
+                button.onClick.AddListener(() => SelectChoice(choiceIndex));
+            }
+        }
+
         private void BindToolButtons()
         {
             if (toolButtons == null)
@@ -343,11 +371,25 @@ namespace Project.Samples.Stage2Breach.Scripts
             }
         }
 
+        private void SelectChoice(int choiceIndex)
+        {
+            if (choiceIndex < 0 || choiceIndex >= currentChoiceIds.Count)
+            {
+                return;
+            }
+
+            var choiceId = currentChoiceIds[choiceIndex];
+            if (!string.IsNullOrWhiteSpace(choiceId) && Services.TryGet<UIManager>(out var uiManager))
+            {
+                uiManager.SelectVNChoice(choiceId);
+            }
+        }
+
         private void EnsureToolInput()
         {
             if (toolInput == null)
             {
-                toolInput = FindFirstObjectByType<Stage2BreachToolInput>();
+                Services.TryGet<IToolInputService>(out toolInput);
             }
         }
 

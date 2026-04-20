@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Project.Core.Runtime.Framework;
 using Project.Core.Runtime.Managers;
 using Project.Gameplay.Scripts.Interactables;
@@ -6,7 +7,7 @@ using UnityEngine;
 
 namespace Project.Samples.Stage2Breach.Scripts
 {
-    public sealed class Stage2BreachToolInput : MonoBehaviour
+    public sealed class Stage2BreachToolInput : MonoBehaviour, IToolInputService
     {
         [SerializeField] private ToolItem[] tools;
         [SerializeField] private int selectedSlot;
@@ -15,7 +16,7 @@ namespace Project.Samples.Stage2Breach.Scripts
         private ToolItem draggedTool;
         private bool isDragging;
 
-        public ToolItem[] Tools => tools;
+        public IReadOnlyList<ToolItem> Tools => tools;
         public int SelectedSlot => selectedSlot;
         public ToolItem CurrentTool => tools != null && selectedSlot >= 0 && selectedSlot < tools.Length ? tools[selectedSlot] : null;
         public bool IsDragging => isDragging;
@@ -24,6 +25,12 @@ namespace Project.Samples.Stage2Breach.Scripts
         private void Awake()
         {
             mainCamera = Camera.main;
+            Services.Register<IToolInputService>(this);
+        }
+
+        private void OnDestroy()
+        {
+            Services.UnregisterInstance(this);
         }
 
         private void Update()

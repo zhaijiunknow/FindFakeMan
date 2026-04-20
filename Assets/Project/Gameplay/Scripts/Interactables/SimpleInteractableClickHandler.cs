@@ -1,6 +1,5 @@
 using Project.Core.Runtime.Framework;
 using Project.Core.Runtime.Managers;
-using Project.Samples.Stage2Breach.Scripts;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
@@ -29,10 +28,7 @@ namespace Project.Gameplay.Scripts.Interactables
                 return;
             }
 
-            
-
-            var toolInput = FindFirstObjectByType<Stage2BreachToolInput>();
-            var handledByTool = toolInput != null && !toolInput.IsDragging && toolInput.TryUseOn(interactable);
+            var handledByTool = Services.TryGet<IToolInputService>(out var toolInput) && !toolInput.IsDragging && toolInput.TryUseOn(interactable);
             if (!handledByTool && Services.TryGet<InteractionManager>(out var interactionManager))
             {
                 interactionManager.OnInteractableClicked(interactable);
