@@ -18,6 +18,7 @@ namespace Project.Samples.Stage2Breach.Scripts
         [SerializeField] private Text[] choiceButtonTexts;
 
         private readonly List<string> currentChoiceIds = new();
+        private int activeChoiceCount;
 
         public void Initialize()
         {
@@ -28,7 +29,7 @@ namespace Project.Samples.Stage2Breach.Scripts
 
         private void Update()
         {
-            if (vnPanel == null || !vnPanel.activeSelf || currentChoiceIds.Count > 0)
+            if (vnPanel == null || !vnPanel.activeSelf || activeChoiceCount > 0)
             {
                 return;
             }
@@ -66,6 +67,7 @@ namespace Project.Samples.Stage2Breach.Scripts
         public void SetChoices(IReadOnlyList<VNChoiceViewData> choices)
         {
             currentChoiceIds.Clear();
+            activeChoiceCount = 0;
             if (choiceButtons != null)
             {
                 for (var i = 0; i < choiceButtons.Length; i++)
@@ -84,15 +86,23 @@ namespace Project.Samples.Stage2Breach.Scripts
                 for (var i = 0; i < count; i++)
                 {
                     var choice = choices[i];
-                    currentChoiceIds.Add(choice?.ChoiceId ?? string.Empty);
+                    var choiceId = choice?.ChoiceId ?? string.Empty;
+                    currentChoiceIds.Add(choiceId);
+
+                    var hasChoice = choice != null && !string.IsNullOrWhiteSpace(choiceId);
                     if (choiceButtons[i] != null)
                     {
-                        choiceButtons[i].gameObject.SetActive(choice != null);
+                        choiceButtons[i].gameObject.SetActive(hasChoice);
+                    }
+
+                    if (hasChoice)
+                    {
+                        activeChoiceCount++;
                     }
 
                     if (choiceButtonTexts != null && i < choiceButtonTexts.Length && choiceButtonTexts[i] != null)
                     {
-                        choiceButtonTexts[i].text = choice?.Text ?? string.Empty;
+                        choiceButtonTexts[i].text = hasChoice ? choice.Text : string.Empty;
                     }
                 }
             }
@@ -103,6 +113,7 @@ namespace Project.Samples.Stage2Breach.Scripts
         public void HideChoices()
         {
             currentChoiceIds.Clear();
+            activeChoiceCount = 0;
             if (choiceButtons == null)
             {
                 return;
@@ -159,7 +170,7 @@ namespace Project.Samples.Stage2Breach.Scripts
         {
             if (vnContinueHintText != null)
             {
-                vnContinueHintText.text = currentChoiceIds.Count > 0 ? string.Empty : "空格 / 右键继续";
+                vnContinueHintText.text = activeChoiceCount > 0 ? string.Empty : "空格 / 右键继续";
             }
         }
     }

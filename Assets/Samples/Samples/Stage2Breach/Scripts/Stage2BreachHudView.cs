@@ -94,7 +94,7 @@ namespace Project.Samples.Stage2Breach.Scripts
             {
                 inspectorTitleText.text = item != null && !string.IsNullOrWhiteSpace(item.DisplayName)
                     ? item.DisplayName
-                    : interactable != null ? interactable.InteractableId : "调查";
+                    : interactable != null && !string.IsNullOrWhiteSpace(interactable.InteractableId) ? interactable.InteractableId : "调查";
             }
 
             if (inspectorBodyText != null)
