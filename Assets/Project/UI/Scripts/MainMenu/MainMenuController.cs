@@ -1,3 +1,4 @@
+using System.Linq;
 using Cysharp.Threading.Tasks;
 using Project.Core.Runtime.Framework;
 using Project.Core.Runtime.Managers;
@@ -175,7 +176,8 @@ namespace Project.UI.MainMenu
                 }
 
                 var slots = saveManager.GetAllSaveSlots();
-                var latestSceneName = slots.Count > 0 ? slots[0].sceneName : string.Empty;
+                var latestSlot = slots.OrderByDescending(slot => slot.timestampTicks).FirstOrDefault();
+                var latestSceneName = latestSlot?.sceneName;
                 await gameManager.ContinueGame();
                 await LoadSceneInternalAsync(string.IsNullOrWhiteSpace(latestSceneName) ? gameplaySceneName : latestSceneName);
             }

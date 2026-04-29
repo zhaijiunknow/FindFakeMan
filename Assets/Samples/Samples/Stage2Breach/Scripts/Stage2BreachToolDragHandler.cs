@@ -1,6 +1,5 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
-using UnityEngine.UI;
 
 namespace Project.Samples.Stage2Breach.Scripts
 {
@@ -16,12 +15,6 @@ namespace Project.Samples.Stage2Breach.Scripts
 
         public void OnPointerDown(PointerEventData eventData)
         {
-            var button = GetComponent<Button>();
-            if (button != null)
-            {
-                button.onClick.Invoke();
-            }
-
             var toolInput = FindFirstObjectByType<Stage2BreachToolInput>();
             toolInput?.BeginDrag(slotIndex);
         }

@@ -19,6 +19,7 @@ namespace Project.Samples.Stage2Breach.Scripts
 
         private Color defaultResultColor;
         private bool hasResultColor;
+        private int hintVersion;
 
         public void Initialize()
         {
@@ -43,8 +44,9 @@ namespace Project.Samples.Stage2Breach.Scripts
                 return;
             }
 
+            hintVersion++;
             hintText.text = content ?? string.Empty;
-            ClearHintAfterDelay(duration).Forget();
+            ClearHintAfterDelay(hintVersion, duration).Forget();
         }
 
         public void SetResult(string content, bool highlight)
@@ -116,7 +118,7 @@ namespace Project.Samples.Stage2Breach.Scripts
             }
         }
 
-        private async UniTaskVoid ClearHintAfterDelay(float duration)
+        private async UniTaskVoid ClearHintAfterDelay(int version, float duration)
         {
             if (hintText == null || duration <= 0f)
             {
@@ -124,7 +126,7 @@ namespace Project.Samples.Stage2Breach.Scripts
             }
 
             await UniTask.Delay((int)(duration * 1000f));
-            if (hintText != null)
+            if (hintText != null && version == hintVersion)
             {
                 hintText.text = string.Empty;
             }

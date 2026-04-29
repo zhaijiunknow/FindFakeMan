@@ -52,8 +52,8 @@ namespace Project.Samples.Stage2Breach.Scripts
 
             var rect = toolDragIndicator.rectTransform;
             toolDragIndicator.transform.SetAsLastSibling();
-            toolDragIndicator.sprite = null;
-            toolDragIndicator.enabled = true;
+            toolDragIndicator.sprite = sprite;
+            toolDragIndicator.enabled = sprite != null;
             rect.sizeDelta = new Vector2(96f, 96f);
 
             SetToolDragValidity(true);

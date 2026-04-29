@@ -150,6 +150,7 @@ namespace Project.Samples.Stage2Breach.Scripts
             var choiceId = currentChoiceIds[choiceIndex];
             if (!string.IsNullOrWhiteSpace(choiceId) && Services.TryGet<UIManager>(out var uiManager))
             {
+                HideChoices();
                 uiManager.SelectVNChoice(choiceId);
             }
         }
