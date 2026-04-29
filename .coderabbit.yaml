@@ -22,83 +22,83 @@ reviews:
   path_instructions:
     - path: "Assets/**/*.asset"
       instructions: |
-        This is a Unity asset file. Review for broken YAML references, invalid GUID/fileID pairs,
-        invalid m_Script pointers, accidental hand-edited asset corruption, and data integrity issues.
-        Be especially alert to placeholder GUIDs, broken text PPtrs, and ScriptableObject asset references
-        that do not match the script's .meta GUID.
+        这是一个 Unity 资源文件。请检查是否存在损坏的 YAML 引用、无效的 GUID/fileID 配对、
+        无效的 m_Script 指针、意外的手工编辑导致的资源损坏，以及数据完整性问题。
+        特别注意占位 GUID、损坏的文本 PPtr，以及与脚本 .meta GUID 不匹配的
+        ScriptableObject 资源引用。
 
     - path: "Assets/**/*.meta"
       instructions: |
-        Review .meta changes carefully. Flag accidental GUID churn, deleted meta files, duplicated GUID risks,
-        or unrelated asset identity changes. .meta integrity is high priority in this repository.
+        请仔细审查 .meta 变更。标记意外的 GUID 变动、被删除的 meta 文件、重复 GUID 风险，
+        或无关的资源身份变更。在此仓库中，.meta 完整性属于高优先级事项。
 
     - path: "ProjectSettings/**"
       instructions: |
-        Treat ProjectSettings changes as high-risk and verify they are intentional and directly related to the task.
-        Flag unrelated build, input, package, rendering, or editor setting changes.
+        将 ProjectSettings 变更视为高风险内容，并确认这些变更是有意为之且与当前任务直接相关。
+        标记无关的构建、输入、包、渲染或编辑器设置改动。
 
     - path: "Assets/Project/Core/Scripts/Runtime/Framework/**/*.cs"
       instructions: |
-        This folder contains shared runtime framework code. These files are exempt from the repository namespace requirement.
-        Review for:
-        - save/load symmetry
-        - GameState correctness
-        - serialization compatibility
-        - breaking changes to shared enums or save data
-        - unintended impact on manager coordination
+        此目录包含共享运行时框架代码。这些文件不受仓库命名空间要求限制。
+        请检查：
+        - 保存/加载对称性
+        - GameState 正确性
+        - 序列化兼容性
+        - 对共享枚举或存档数据的破坏性修改
+        - 对管理器协作的非预期影响
 
     - path: "Assets/Project/Core/Scripts/Runtime/Managers/**/*.cs"
       instructions: |
-        This folder contains central runtime managers registered through the Services registry.
-        These files are exempt from the repository namespace requirement.
-        Review for:
-        - incorrect manager lifecycle assumptions
-        - missing TryGet/Get safety
-        - state transition bugs
-        - pause/resume mismatches
-        - new persistent state not integrated with SaveManager
-        - duplicated responsibility between managers
+        此目录包含通过 Services 注册表注册的核心运行时管理器。
+        这些文件不受仓库命名空间要求限制。
+        请检查：
+        - 错误的管理器生命周期假设
+        - 缺失的 TryGet/Get 安全性
+        - 状态转换缺陷
+        - 暂停/恢复不一致
+        - 新增持久化状态未接入 SaveManager
+        - 管理器之间职责重复
 
     - path: "Assets/Project/Narrative/**/*.cs"
       instructions: |
-        This folder contains the visual novel framework.
-        These files are exempt from the repository namespace requirement.
-        Review for:
-        - incorrect narrative node execution order
-        - condition checks happening after side effects
-        - flag writes happening in the wrong order
-        - invalid or dead-end node/sequence jumps
-        - duplicate IDs
-        - save/load restoration bugs
-        - stuck states involving auto-continue, choice waiting, or external signal waiting
-        - runtime mutation of ScriptableObject authoring data
+        此目录包含视觉小说框架。
+        这些文件不受仓库命名空间要求限制。
+        请检查：
+        - 叙事节点执行顺序错误
+        - 条件检查发生在副作用之后
+        - 标记写入顺序错误
+        - 无效或走不通的节点/序列跳转
+        - 重复 ID
+        - 保存/加载恢复缺陷
+        - 自动继续、等待选项或等待外部信号相关的卡死状态
+        - 对 ScriptableObject 作者数据的运行时修改
 
     - path: "Assets/Project/Narrative/**/*.asset"
       instructions: |
-        These are narrative data assets. Review for:
-        - broken m_Script references
-        - duplicate chapter/sequence/node/choice IDs
-        - invalid targetSequenceId / targetNodeId references
-        - missing required fields that would cause runtime-only failures
-        - asset data that appears to encode runtime state instead of authoring/configuration state
+        这些是叙事数据资源。请检查：
+        - 损坏的 m_Script 引用
+        - 重复的 chapter/sequence/node/choice ID
+        - 无效的 targetSequenceId / targetNodeId 引用
+        - 可能导致仅在运行时报错的必填字段缺失
+        - 看起来把运行时状态编码进资源数据，而不是作者/配置状态的数据
 
     - path: "Assets/Project/Gameplay/**/*.cs"
       instructions: |
-        Review gameplay code for consistency with manager-driven architecture.
-        Gameplay scripts should use an explicit namespace.
-        Flag any new or modified script without a namespace declaration.
-        Exemptions: manager scripts, base/shared framework scripts, and the visual novel system.
-        Also flag direct runtime mutation of ScriptableObject config assets, missing save/load implications,
-        and interaction logic that bypasses GameManager/UIManager/InteractionManager patterns.
+        请检查玩法代码是否与管理器驱动架构保持一致。
+        玩法脚本应使用显式命名空间。
+        标记任何新增或修改但未声明命名空间的脚本。
+        例外：管理器脚本、基础/共享框架脚本，以及视觉小说系统。
+        同时标记对 ScriptableObject 配置资源的直接运行时修改、缺失的保存/加载影响，
+        以及绕过 GameManager/UIManager/InteractionManager 模式的交互逻辑。
 
     - path: "Assets/**/*.cs"
       instructions: |
-        Repository convention: except for manager scripts, shared base/framework scripts,
-        and the visual novel system, all C# scripts should use an explicit namespace.
-        Flag new or modified scripts that omit a namespace unless they clearly belong to an exempt category.
+        仓库约定：除管理器脚本、共享基础/框架脚本，以及视觉小说系统外，
+        所有 C# 脚本都应使用显式命名空间。
+        标记新增或修改但缺少命名空间的脚本，除非它明显属于例外类别。
 
 chat:
-  auto_reply: false
+  auto_reply: true
 
 knowledge_base:
   code_guidelines:
@@ -115,9 +115,9 @@ knowledge_base:
   issues:
     scope: auto
 
-language: en-US
+language: zh-CN
 
 tone_instructions: |
-  Be concise and technical. Prioritize correctness over style.
-  Focus on Unity asset integrity, save/load consistency, VN flow safety,
-  state transitions, and missing namespaces in non-exempt scripts.
+  保持简明和技术性。优先保证正确性而非风格。
+  关注 Unity 资源完整性、存储/加载一致性、视觉小说流程安全、状态转换，
+  以及非例外脚本中缺失的命名空间。
