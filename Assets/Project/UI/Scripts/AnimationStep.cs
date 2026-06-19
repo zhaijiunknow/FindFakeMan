@@ -3,15 +3,17 @@ using DG.Tweening;
 
 public abstract class AnimationStep : MonoBehaviour
 {
-    [Header("分组信息")]
+    [Header("锟斤拷锟斤拷锟斤拷息")]
     [SerializeField] protected string groupName = "Default";
     [SerializeField] protected int orderInGroup = 0;
+    [SerializeField] protected float delayBefore = 0f;
 
     public string GroupName => groupName;
     public int OrderInGroup => orderInGroup;
+    public float DelayBefore => delayBefore;
 
     /// <summary>
-    /// 子类必须重写，返回该步骤对应的 Tween 动画。
+    /// 锟斤拷锟斤拷锟斤拷锟斤拷锟叫达拷锟斤拷锟斤拷馗貌锟斤拷锟斤拷应锟斤拷 Tween 锟斤拷锟斤拷锟斤拷
     /// </summary>
     public abstract Tween GetTween();
 }

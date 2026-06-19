@@ -5,15 +5,14 @@ public class MoveStep : AnimationStep
 {
     public enum MoveType
     {
-        AnchorPosition,  // UI ÍÆ¼ö£ºĞŞ¸Ä anchoredPosition
-        LocalPosition,   // ĞŞ¸Ä localPosition
-        WorldPosition    // ĞŞ¸Ä worldPosition
+        AnchorPosition,
+        LocalPosition,
+        WorldPosition
     }
 
-    [Header("ÒÆ¶¯ÉèÖÃ")]
+    [Header("ç§»åŠ¨å‚æ•°")]
     [SerializeField] private Transform targetTransform;
     [SerializeField] private MoveType moveType = MoveType.AnchorPosition;
-    [SerializeField] private Vector3 targetPosition;
     [SerializeField] private float moveDuration = 1f;
     [SerializeField] private Ease moveEase = Ease.OutQuad;
 
@@ -21,29 +20,23 @@ public class MoveStep : AnimationStep
     {
         if (targetTransform == null)
         {
-            Debug.LogError("MoveStep: È±ÉÙÄ¿±ê Transform");
+            Debug.LogError("MoveStep: ç¼ºå°‘ç›®æ ‡ Transform");
             return null;
-        }
-
-        // ×Ô¶¯¼ì²â£ºÈç¹ûÄ¿±êÊÇ RectTransform ÇÒÒÆ¶¯ÀàĞÍÎ´ÊÖ¶¯¸Ä±ä£¬ÔòÄ¬ÈÏÊ¹ÓÃ AnchorPosition
-        if (moveType == MoveType.AnchorPosition && targetTransform is RectTransform rt)
-        {
-            return rt.DOAnchorPos(targetPosition, moveDuration).SetEase(moveEase);
         }
 
         switch (moveType)
         {
             case MoveType.AnchorPosition:
-                if (targetTransform is RectTransform rect)
-                    return rect.DOAnchorPos(targetPosition, moveDuration).SetEase(moveEase);
-                Debug.LogWarning("Ä¿±ê²»ÊÇ RectTransform£¬AnchorPosition ²»¿ÉÓÃ£¬ÒÑ½µ¼¶Îª LocalPosition");
-                return targetTransform.DOLocalMove(targetPosition, moveDuration).SetEase(moveEase);
+                if (transform is RectTransform selfRect && targetTransform is RectTransform targetRect)
+                    return selfRect.DOAnchorPos(targetRect.anchoredPosition, moveDuration).SetEase(moveEase);
+                Debug.LogWarning("MoveStep: AnchorPosition éœ€è¦å½“å‰å¯¹è±¡å’Œç›®æ ‡å¯¹è±¡éƒ½ä¸º RectTransformï¼Œå·²è‡ªåŠ¨é™çº§ä¸º LocalPosition");
+                return transform.DOLocalMove(targetTransform.localPosition, moveDuration).SetEase(moveEase);
 
             case MoveType.LocalPosition:
-                return targetTransform.DOLocalMove(targetPosition, moveDuration).SetEase(moveEase);
+                return transform.DOLocalMove(targetTransform.localPosition, moveDuration).SetEase(moveEase);
 
             case MoveType.WorldPosition:
-                return targetTransform.DOMove(targetPosition, moveDuration).SetEase(moveEase);
+                return transform.DOMove(targetTransform.position, moveDuration).SetEase(moveEase);
 
             default:
                 return null;
