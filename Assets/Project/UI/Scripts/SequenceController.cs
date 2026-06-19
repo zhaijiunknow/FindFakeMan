@@ -8,6 +8,8 @@ using DG.Tweening;
 /// </summary>
 public class SequenceController : MonoBehaviour
 {
+    private static readonly HashSet<string> PlayedSequenceKeys = new();
+
     [Header("步骤缓存")]
     [Tooltip("自动收集当前场景中的 AnimationStep，无需手动拖拽")]
     [SerializeField] private List<AnimationStep> manualSteps = new();
@@ -18,6 +20,13 @@ public class SequenceController : MonoBehaviour
 
     private Sequence mainSequence;
     private bool hasPlayed = false;
+    private string sequenceKey;
+
+    private void Awake()
+    {
+        sequenceKey = $"{gameObject.scene.path}:{transform.GetHierarchyPath()}";
+        hasPlayed = playOnce && PlayedSequenceKeys.Contains(sequenceKey);
+    }
 
     private void Reset()
     {
@@ -174,8 +183,27 @@ public class SequenceController : MonoBehaviour
         if (mainSequence == null)
             return;
 
+        if (playOnce && hasPlayed)
+            return;
+
         mainSequence.Rewind();
         mainSequence.Play();
         hasPlayed = true;
+
+        if (playOnce)
+        {
+            PlayedSequenceKeys.Add(sequenceKey);
+        }
+    }
+}
+
+internal static class TransformHierarchyPathExtensions
+{
+    public static string GetHierarchyPath(this Transform transform)
+    {
+        if (transform.parent == null)
+            return transform.name;
+
+        return $"{transform.parent.GetHierarchyPath()}/{transform.name}";
     }
 }
