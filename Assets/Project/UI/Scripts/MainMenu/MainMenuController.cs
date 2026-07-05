@@ -25,7 +25,7 @@ namespace Project.UI.MainMenu
         [SerializeField] private Button continueButton;
         [SerializeField] private GameObject rootPanel;
         [SerializeField] private GameObject rootButtonContainer;
-        [SerializeField] private GameObject settingsPanel;
+        [SerializeField] private UIWindowManager settingsPanel;
         [SerializeField] private GameObject levelSelectPanel;
         [SerializeField] private GameObject creditsPanel;
         [SerializeField] private GameObject[] settingTargets;
@@ -70,7 +70,7 @@ namespace Project.UI.MainMenu
 
         public void OnOpenSettings()
         {
-            ShowOnly(settingsPanel);
+            Expand(settingsPanel);
         }
 
         public void OnOpenLevelSelect()
@@ -235,16 +235,18 @@ namespace Project.UI.MainMenu
         {
             ShowOnly(rootPanel);
         }
-
         private void ShowOnly(GameObject target)
         {
             SetActive(rootPanel, target == rootPanel);
             SetActive(rootButtonContainer, target == rootPanel);
-            SetActive(settingsPanel, target == settingsPanel);
+            //SetActive(settingsPanel, target == settingsPanel);
             SetActive(levelSelectPanel, target == levelSelectPanel);
             SetActive(creditsPanel, target == creditsPanel);
         }
-
+        private static void Expand(UIWindowManager panel)
+        {
+            panel.Expand();
+        }
         private static void SetActive(GameObject panel, bool visible)
         {
             if (panel != null)
