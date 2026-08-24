@@ -26,13 +26,6 @@ namespace Project.Narrative.Scripts
         public string CurrentSequenceId => currentSequence != null ? currentSequence.sequenceId : string.Empty;
         public string CurrentNodeId => currentNode != null ? currentNode.nodeId : string.Empty;
 
-        private async void Start()
-        {
-            if (startupChapter != null)
-            {
-                await StartChapter(startupChapter);
-            }
-        }
 
         public async UniTask StartChapter(VNChapterConfig chapter)
         {

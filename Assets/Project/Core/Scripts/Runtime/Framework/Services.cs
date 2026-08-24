@@ -50,6 +50,19 @@ namespace Project.Core.Runtime.Framework
             return false;
         }
 
+        /// <summary>按类型查找已注册实例（供单例重复检测用）。</summary>
+        public static bool TryGet(Type serviceType, out object service)
+        {
+            if (serviceType != null && Registry.TryGetValue(serviceType, out var instance))
+            {
+                service = instance;
+                return true;
+            }
+
+            service = null;
+            return false;
+        }
+
         public static T Get<T>() where T : class
         {
             if (TryGet<T>(out var service))

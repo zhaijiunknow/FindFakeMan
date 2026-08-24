@@ -1,8 +1,6 @@
-using System.Linq;
 using Cysharp.Threading.Tasks;
 using Project.Core.Runtime.Framework;
 using Project.Core.Runtime.Managers;
-using Project.Narrative.Scripts;
 using Project.UI.Panels;
 using UnityEngine;
 using UnityEngine.UI;
@@ -141,7 +139,7 @@ namespace Project.UI.Scripts
 
         /// <summary>
         /// start 按钮流程：序章已完成 → 隐藏自身显示 targetObject(all_button)；
-        /// 未完成 → 播放序章(VNDirector.StartChapter) + 标记完成，再隐藏自身显示 targetObject。
+        /// 未完成 → 跳到 Px2050_Prologue 序章场景（场景内的 VNDirector 会播完整序章演出）。
         /// </summary>
         private async UniTask StartFlowAsync()
         {
@@ -151,22 +149,15 @@ namespace Project.UI.Scripts
                 return;
             }
 
-            var director = FindObjectOfType<VNDirector>();
-            var prologue = LoadChapter("chapter_prologue");
-            if (director != null && prologue != null)
+            // 未完成：进入序章场景（播放完整序章演出）。
+            if (Services.TryGet<SceneFlowManager>(out var sceneFlow))
             {
-                await director.StartChapter(prologue);
-                if (Services.TryGet<FlagManager>(out var f))
-                {
-                    f.Set("prologue_complete");
-                }
+                await sceneFlow.LoadSceneAsync("Px2050_Prologue");
             }
             else
             {
-                Debug.LogWarning("ButtonAction: 未找到 VNDirector 或序章章节，无法播放序章。");
+                Debug.LogWarning("ButtonAction: 未找到 SceneFlowManager，无法跳转序章场景。");
             }
-
-            HideSelfShow();
         }
 
         private void HideSelfShow()
@@ -177,10 +168,6 @@ namespace Project.UI.Scripts
                 targetObject.SetActive(true);
             }
         }
-
-        private static VNChapterConfig LoadChapter(string chapterId) =>
-            Resources.LoadAll<VNChapterConfig>(string.Empty)
-                .FirstOrDefault(c => c != null && c.ChapterId == chapterId);
 
         private async UniTask LoadSceneAsync(string sceneName)
         {

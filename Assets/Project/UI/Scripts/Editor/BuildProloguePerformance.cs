@@ -31,6 +31,16 @@ namespace Project.UI.Editor
                 return;
             }
 
+            // 幂等：先移除旧的演出对象（重跑不重复）。
+            foreach (var name in new[] { "BlackOverlay", "ScreenFx", "ProloguePerformanceDirector" })
+            {
+                foreach (var go in Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+                    .Where(g => g.name == name))
+                {
+                    Object.DestroyImmediate(go);
+                }
+            }
+
             // CRT 扫描线层（先建，z 在 black 之下；初始隐藏）
             var fx = CreateOverlay("ScreenFx", canvas.transform, Color.white);
             var fxOverlay = fx.AddComponent<ScreenFxOverlay>();
@@ -41,7 +51,8 @@ namespace Project.UI.Editor
             var blackGroup = black.GetComponent<CanvasGroup>();
             blackGroup.alpha = 1f;
 
-            var vnDirector = Object.FindObjectOfType<VNDirector>();
+            var vnDirector = Object.FindObjectsByType<VNDirector>(FindObjectsInactive.Include, FindObjectsSortMode.None).FirstOrDefault();
+            Debug.Log($"[Prologue] FindObjectsByType<VNDirector> -> {(vnDirector != null ? "found" : "NULL")}");
 
             var dirGo = new GameObject("ProloguePerformanceDirector");
             var dir = dirGo.AddComponent<ProloguePerformanceDirector>();
@@ -49,6 +60,7 @@ namespace Project.UI.Editor
             so.FindProperty("blackOverlay").objectReferenceValue = blackGroup;
             so.FindProperty("backgroundImage").objectReferenceValue = background;
             so.FindProperty("screenFx").objectReferenceValue = fxOverlay;
+            so.FindProperty("vndirector").objectReferenceValue = vnDirector;
             so.ApplyModifiedPropertiesWithoutUndo();
 
             EditorUtility.SetDirty(canvas.gameObject);
