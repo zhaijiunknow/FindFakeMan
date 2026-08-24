@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
 using Project.Core.Runtime.Framework;
 using UnityEngine;
 using Project.Gameplay.Scripts.Interactables;
 using Project.Gameplay.Scripts.Items;
 using Project.Narrative.Scripts;
+using Project.UI.Panels;
 
 namespace Project.Core.Runtime.Managers
 {
@@ -21,13 +23,27 @@ namespace Project.Core.Runtime.Managers
         public void ShowPanel(string panelId)
         {
             OnPanelShown?.Invoke(panelId);
-            Debug.Log($"ShowPanel: {panelId}");
+            if (Services.TryGet<PanelManager>(out var panelManager))
+            {
+                panelManager.OpenPanelAsync(panelId).Forget();
+            }
+            else
+            {
+                Debug.Log($"ShowPanel: {panelId}（无 PanelManager，仅记录）");
+            }
         }
 
         public void HidePanel(string panelId)
         {
             OnPanelHidden?.Invoke(panelId);
-            Debug.Log($"HidePanel: {panelId}");
+            if (Services.TryGet<PanelManager>(out var panelManager))
+            {
+                panelManager.ClosePanelByIdAsync(panelId).Forget();
+            }
+            else
+            {
+                Debug.Log($"HidePanel: {panelId}（无 PanelManager，仅记录）");
+            }
         }
 
         public void ShowInspector(Item item, SimpleInteractable interactable)

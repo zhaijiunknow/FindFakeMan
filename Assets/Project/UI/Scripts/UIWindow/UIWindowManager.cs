@@ -1,22 +1,38 @@
+using System.Linq;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.UI;
 using DG.Tweening;
 
 public class UIWindowManager : MonoBehaviour
 {
     [Header("UI References")]
-    public RectTransform closedUI;         // Í¼±ê RectTransform£¨ÓÒÉÏ½Ç anchor£©
-    public RectTransform openedUI;         // Õ¹¿ª´°¿Ú RectTransform£¨ÖĞĞÄ anchor£©
-    public CanvasGroup openedUIGroup;      // ÓÃÓÚ½¥±äÍ¸Ã÷
+    public RectTransform closedUI;         // æ”¶èµ·çŠ¶æ€ï¼ˆæœ€å°åŒ–/ä»»åŠ¡æ å°å›¾ï¼‰é”šç‚¹
+    public RectTransform openedUI;         // å±•å¼€çŠ¶æ€ï¼ˆçª—å£ä¸»ä½“ï¼‰
+    public CanvasGroup openedUIGroup;      // çª—å£é€æ˜åº¦
 
-    [Header("¶¯»­ÉèÖÃ")]
+    [Header("åŠ¨ç”»")]
     public float animationDuration = 0.4f;
+
+    [Header("åˆå§‹çŠ¶æ€")]
+    [Tooltip("è¿è¡Œå¼€å§‹æ—¶çª—å£çš„åˆå§‹çŠ¶æ€ï¼šé»˜è®¤éšè—ï¼ˆfalseï¼‰ï¼›å‹¾é€‰ååˆå§‹ç›´æ¥æ˜¾ç¤ºï¼ˆtrueï¼‰")]
+    [SerializeField] private bool startVisible = false;
 
     private Vector2 savedOpenedPos;
     private Vector3 savedOpenedScale;
     private Vector2 closedSize;
-
     private RectTransform canvasRect;
+
+    // çª—å£ä¸‰æ€ï¼ˆé“ºæ»¡ â‡„ çª—å£ï¼‰è®°å½•
+    private Vector2 normalAnchorMin, normalAnchorMax, normalOffsetMin, normalOffsetMax;
+    private bool isFull;
+
+    /// <summary>è¿ç‚¹é˜²å †ç§¯ï¼šå…ˆæ€æ‰ openedUI/openedUIGroup ä¸Šçš„æ—§åŠ¨ç”»ã€‚</summary>
+    private void KillTweens()
+    {
+        if (openedUI != null) DOTween.Kill(openedUI);
+        if (openedUIGroup != null) DOTween.Kill(openedUIGroup);
+    }
 
     private void Awake()
     {
@@ -25,81 +41,113 @@ public class UIWindowManager : MonoBehaviour
         closedSize = closedUI.sizeDelta;
         savedOpenedPos = openedUI.anchoredPosition;
         savedOpenedScale = openedUI.localScale;
-        openedUIGroup.alpha = 0f;
-        openedUI.gameObject.SetActive(false);
+        if (startVisible)
+        {
+            openedUI.gameObject.SetActive(true);
+            openedUI.anchoredPosition = savedOpenedPos;
+            openedUI.localScale = Vector3.one;
+            openedUIGroup.alpha = 1f;
+        }
+        else
+        {
+            openedUIGroup.alpha = 0f;
+            openedUI.gameObject.SetActive(false);
+        }
+
+        // é€šç”¨çª—å£ä¸‰é”®ï¼šred=å…³é—­ï¼Œgreen=æœ€å¤§åŒ–(é“ºæ»¡)ï¼Œblue=çª—å£åŒ–(è¿˜åŸ)ã€‚ä»»æ„çª—å£æ ‡é¢˜æ å¸¦è¿™äº›é”®å³ç”Ÿæ•ˆã€‚
+        BindButton("red", OnCloseWindow);
+        BindButton("green", OnMaximize);
+        BindButton("blue", OnRestore);
     }
 
-    public void OnClickClosedChat()
+    private void BindButton(string childName, UnityAction action)
     {
-        Expand();
+        var t = GetComponentsInChildren<Transform>(true).FirstOrDefault(x => x.name == childName);
+        t?.GetComponent<Button>()?.onClick.AddListener(action);
     }
 
-    public void OnClickClose()
+    // ---------- çª—å£ä¸‰æ€ ----------
+
+    public void OnClickClosedChat() => Expand();
+    public void OnClickClose() => Collapse();
+
+    /// <summary>å…³é—­ï¼šæ”¶èµ·ï¼ˆredï¼‰ã€‚</summary>
+    public void OnCloseWindow() => Collapse();
+
+    /// <summary>æœ€å¤§åŒ–ï¼šçª—å£ â†’ é“ºæ»¡ï¼ˆgreenï¼‰ã€‚</summary>
+    public void OnMaximize()
     {
-        Collapse();
+        if (openedUI == null || isFull) return;
+        RecordOpened();
+        openedUI.anchorMin = Vector2.zero;
+        openedUI.anchorMax = Vector2.one;
+        openedUI.offsetMin = Vector2.zero;
+        openedUI.offsetMax = Vector2.zero;
+        isFull = true;
     }
+
+    /// <summary>çª—å£åŒ–ï¼šé“ºæ»¡ â†’ è¿˜åŸçª—å£ï¼ˆblueï¼‰ã€‚</summary>
+    public void OnRestore()
+    {
+        if (openedUI == null || !isFull) return;
+        openedUI.anchorMin = normalAnchorMin;
+        openedUI.anchorMax = normalAnchorMax;
+        openedUI.offsetMin = normalOffsetMin;
+        openedUI.offsetMax = normalOffsetMax;
+        isFull = false;
+    }
+
+    private void RecordOpened()
+    {
+        if (openedUI == null) return;
+        normalAnchorMin = openedUI.anchorMin;
+        normalAnchorMax = openedUI.anchorMax;
+        normalOffsetMin = openedUI.offsetMin;
+        normalOffsetMax = openedUI.offsetMax;
+    }
+
+    // ---------- å±•å¼€ / æ”¶èµ· ----------
 
     public void Expand()
     {
-        // »ñÈ¡ closedChat µÄÊÀ½çÖĞĞÄµã
+        KillTweens();
         Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
-
-        // ½«ÊÀ½çµã×ª»»Îª openedChat ËùÔÚ¸¸¼¶µÄ±¾µØ×ø±ê£¨Í¨³£ÊÇ Canvas£©
         Vector2 localPoint;
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(openedUI, worldPos, null, out localPoint);
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out localPoint);
 
-        // ÆôÓÃ²¢ÉèÖÃ openedChat ÆğÊ¼×´Ì¬
         openedUI.gameObject.SetActive(true);
         openedUI.anchoredPosition = localPoint;
 
-        // Ëõ·Å±ÈÀı
         Vector2 openedSize = openedUI.sizeDelta;
         float scaleX = closedSize.x / openedSize.x;
         float scaleY = closedSize.y / openedSize.y;
         openedUI.localScale = new Vector3(scaleX, scaleY, 1f);
         openedUIGroup.alpha = 0f;
 
-        // ²¥·ÅÕ¹¿ª¶¯»­
         openedUI.DOAnchorPos(savedOpenedPos, animationDuration);
         openedUI.DOScale(Vector3.one, animationDuration);
         openedUIGroup.DOFade(1f, animationDuration);
-
-        //closedUI.DOScale(Vector3.zero, animationDuration).OnComplete(() =>
-        //{
-        //    closedUI.gameObject.SetActive(false);
-        //    closedUI.localScale = Vector3.one;
-        //});
-
     }
 
     public void Collapse()
     {
-        // ¼ÇÂ¼ openedChat µ±Ç°ÃªµãÎ»ÖÃ
+        KillTweens();
         savedOpenedPos = openedUI.anchoredPosition;
         savedOpenedScale = openedUI.localScale;
 
-        // »ñÈ¡ closedChat µÄÊÀ½çÖĞĞÄµã
         Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
         Vector2 localPoint;
         RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out localPoint);
 
-        // Ëõ·Å±ÈÀı
         Vector2 openedSize = openedUI.sizeDelta;
         float scaleX = closedSize.x / openedSize.x;
         float scaleY = closedSize.y / openedSize.y;
 
-        // ²¥·ÅÊÕÆğ¶¯»­
         openedUI.DOAnchorPos(localPoint, animationDuration);
         openedUI.DOScale(new Vector3(scaleX, scaleY, 1f), animationDuration);
         openedUIGroup.DOFade(0f, animationDuration).OnComplete(() =>
         {
             openedUI.gameObject.SetActive(false);
         });
-
-        // ÏÔÊ¾²¢¶¯»­»Ö¸´ closedChat
-        //closedUI.gameObject.SetActive(true);
-        //closedUI.localScale = Vector3.zero;
-        //closedUI.DOScale(Vector3.one, animationDuration);
     }
-
 }

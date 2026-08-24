@@ -20,6 +20,9 @@ public class MoveStep : AnimationStep
     [SerializeField] private bool useSteppedMovement = false;
     [SerializeField] private int steps = 5;                       // 跳跃步数
 
+    [Tooltip("每一步停顿后，快速移动到下一帧所用的时长（秒）。值越小，顿一下后窜得越急促")]
+    [SerializeField] private float stepMoveDuration = 0.15f;
+
     [Tooltip("启用后，每一步的等待时间将固定为下方设定的值（忽略总时长）")]
     [SerializeField] private bool useCustomStepDuration = false;
 
@@ -107,18 +110,17 @@ public class MoveStep : AnimationStep
             stepInterval = moveDuration / actualSteps;   // 均匀分配总时长
         }
 
-        // 3. 构建步进动画
+        // 3. 构建步进动画：每步先停顿，再快速移动到下一帧，形成“顿一下再窜出”的效果
         for (int i = 1; i <= actualSteps; i++)
         {
             seq.AppendInterval(stepInterval);
 
-            int stepIndex = i;
-            seq.AppendCallback(() =>
-            {
-                float progress = (float)stepIndex / actualSteps;
-                Vector3 currentPos = Vector3.Lerp(startPos, endPos, progress);
-                SetPosition(currentPos);
-            });
+            float progress = (float)i / actualSteps;
+            Vector3 nextPos = Vector3.Lerp(startPos, endPos, progress);
+
+            Tween moveTween = CreateMoveTo(nextPos, stepMoveDuration);
+            if (moveTween != null)
+                seq.Append(moveTween);
         }
 
         return seq;
@@ -144,6 +146,28 @@ public class MoveStep : AnimationStep
             case MoveType.WorldPosition:
                 transform.position = pos;
                 break;
+        }
+    }
+
+    private Tween CreateMoveTo(Vector3 pos, float duration)
+    {
+        if (transform == null) return null;
+
+        switch (moveType)
+        {
+            case MoveType.AnchorPosition:
+                if (transform is RectTransform rect)
+                    return rect.DOAnchorPos(pos, duration).SetEase(moveEase);
+                return transform.DOLocalMove(pos, duration).SetEase(moveEase);
+
+            case MoveType.LocalPosition:
+                return transform.DOLocalMove(pos, duration).SetEase(moveEase);
+
+            case MoveType.WorldPosition:
+                return transform.DOMove(pos, duration).SetEase(moveEase);
+
+            default:
+                return null;
         }
     }
 }

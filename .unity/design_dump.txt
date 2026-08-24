@@ -1,0 +1,787 @@
+===== SHEET: Sheet1  (rows=167 cols=5) =====
+r1: 一、整体架构策略
+r2: ManagerA 调用桥接脚本的接口 → 桥接脚本 → 调用 ManagerB 的方法
+r4: GameManager | 顶层状态机（启动/标题/探索/检查/暂停/结局），控制全局流程。
+r5: InteractionManager | 管理场景中所有交互点的注册/注销，监听点击事件，协调与 UI 的切换。
+r6: UIManager | 管理所有界面面板，提供显示/隐藏 API，处理屏幕特效。
+r7: SanityManager | 维护 san 值，提供增减接口，san 值归零时触发结局；根据当前 san 值动态调整 UI 效果。
+r8: InventoryManager | 管理收容箱和物品栏；提供物品添加/移除/查询接口。
+r9: FlagManager | 存储剧情标志位，例如“二楼是否解锁”“是否见过某个 CG”；全局唯一真相来源。
+r10: BranchManager | 管理伪人/人类线的随机分支。使用确定性随机种子，保证读档后分支结果一致；每个交互点可单独配置异常概率。
+r11: EvidenceManager | 统计已收集的“基础证据”，达到设定值时触发事件。
+r12: SaveManager | 序列化/反序列化存档，保存 san 值、背包、收容箱、标志位、当前场景、随机种子、已被拾取/破坏的交互点列表。
+r13: AudioManager | 管理 BGM、环境音、UI 音效、角色语音；支持动态参数。
+r14: SceneManager | 封装场景加载，提供加载进度回调，并在场景切换时保持 DontDestroyOnLoad 对象。
+r15: GameLoopManager | 管理关卡内部的核心循环。
+r16: CGMgr | 管理背景图片，播放 CG，支持跳过，播放前后触发事件。
+r18: 二、道具系统策略：同一基类 + 两个子类
+r20: 2.1 抽象基类 Item
+r21: 仅包含所有道具共有的属性和交互钩子
+r23: 标识：itemId、displayName、icon、description
+r24: 交互钩子：OnPickup()、OnDiscard()、OnInspect()、GetAvailableActions()（返回各拖拽方向对应的 ItemAction）
+r26: 2.2 子类一：ClueItem（线索道具）
+r27: 职责：证据收集、剧情推进、影响分支走向。
+r29: isAnomaly（是否为伪人线线索）
+r30: requiresContainment（是否必须进收容箱）
+r32: 重写 OnPickup() 时，若为异常线索则强制调用 InventoryManager 放入收容箱而非背包
+r33: 重写 OnDiscard() 时，若为异常线索则强制调用 SanityManager 减 san 值
+r34: 重写 OnInspect() 时根据 isAnomaly 显示不同描述文本
+r36: 2.3 子类二：ToolItem（可使用工具）
+r37: 职责：主动调查、解锁交互。
+r39: durability（当前耐久）/ maxDurability
+r40: toolType（紫外线灯/温度计/探测器等）
+r41: equippedSlotIndex（占用的物品栏索引）
+r43: OnEquip() / OnUnequip()：更新物品栏 UI，通知 InteractionManager 该工具已装备
+r44: OnUse()：消耗耐久、执行工具效果（如紫外线灯显示隐藏字迹）
+r45: 重写 GetAvailableActions() 时，确保体感式交互不会产生冲突
+r47: 三、动作系统策略：道具基类不直接调用管理器
+r49: 3.1 动作的职责
+r50: 每个具体的交互行为（拾取、丢弃、装备、使用、检查）封装为独立的 ItemAction 派生类（如 PickupAction、EquipAction、UseToolAction）。动作负责：
+r52: 通过 Services.Get<T>() 调用所需的一个或多个管理器
+r53: 按顺序执行业务逻辑（扣道具、加减 san、设 flag、播 CG）
+r54: 处理动作失败条件（道具满、耐久不足、san 归零）
+r56: 3.2 道具基类与动作的协作
+r58: 道具基类持有 Dictionary<DragDirection, ItemAction> directionActions，以及 useAction、discardAction 等快捷动作引用。
+r59: 提供 ExecuteAction(DragDirection dir) 方法，内部查找对应动作并调用 Execute()。
+r60: 道具基类完全不感知管理器的存在——它只依赖 ItemAction 抽象。
+r62: 3.3 动作调用不同管理器的典型映射
+r64: 动作类型 | 调用的管理器 | 说明
+r65: PickupAction | InventoryManager、SanityManager | 检查容量 → 添加到收容箱 → 设标志位
+r66: DiscardAction | InventoryManager、InteractionManager | 移除道具 → 异常物品扣 san → 设标志位
+r67: EquipAction | InventoryManager、UIManager | 检查容量 → 装备到装备栏 → 更新 UI → 设标志位
+r68: UseToolAction | InventoryManager、SanityManager | 减耐久 → 耐久归零则卸下 → 设标志位
+r69: UseConsumableAction | SanityManager、InventoryManager | 恢复 san → 移除道具 → 设标志位
+r70: InspectAction | UIManager、FlagManager | 显示描述 → 首次检查则设标志 → 设标志位
+r72: 四、交互与拖拽系统策略
+r74: 4.1 交互点配置
+r75: 场景中每个可交互对象挂载 SimpleInteractable 组件，配置：
+r77: 关联的 Item 实例（从 ItemData ScriptableObject 运行时创建）
+r78: 每个拖拽方向（上/下/左/右）对应的 ItemAction（可直接引用动作资源）
+r79: 伪人线概率 anomalyChance 及伪人线时是否替换动作/描述
+r81: 4.2 精查界面流程
+r83: 玩家点击交互点 → InteractionManager 通知 UIManager 打开 InspectorUI，并传入当前道具实例。
+r84: UI 面板显示道具图标、名称、描述，并根据 item.GetAvailableActions() 动态显示四个方向的提示图标（如“装备”“拾取”“丢弃”“检查”）。
+r85: 玩家拖拽（距离超过阈值）→ UI 检测方向 → 调用 item.ExecuteAction(direction) → 动作执行 → 关闭面板。
+r86: 若拖拽距离小于阈值（轻点）→ 仅显示详细描述（调用 InspectAction 或内联显示），不关闭面板。
+r88: 4.3 使用道具流程
+r90: 拖拽工具到交互点 → 直接执行工具交互
+r91: 如果玩家在拖工具 → 不触发点击精查
+r93: 4.4 状态机切换
+r94: 点击交互点时，GameManager 状态从 Exploration 切换到 Inspection，暂停其他交互。动作执行完毕后切回 Exploration。
+r96: 五、数据持久化策略
+r98: 5.1 存档内容
+r100: 全局数据：san 值、随机分支种子、当前场景、已解锁区域
+r101: 背包/收容箱/装备栏：每个道具的 itemId 及运行时状态（耐久、异常标记）
+r102: 标志位字典（FlagManager）
+r103: 已被拾取/销毁的交互点 ID 列表
+r105: 5.2 读档流程
+r107: 加载目标场景。
+r108: 反序列化 JSON。
+r109: 恢复各管理器状态（通过 Services.Get<T>().LoadState(data) 接口）。
+r110: 遍历场景中的 SimpleInteractable，若其 itemId 在销毁列表中则禁用。
+r112: 六、扩展接口总结
+r115: 预留接口/方法 | 所属模块 | 未来用途
+r116: IEquippable | 道具系统 | 支持工具的装备/卸下及耐久管理
+r117: IAnomalous | 道具系统 | 支持异常线索的持续掉 san、收容要求
+r118: OnSanityTick() | ClueItem | 异常线索在背包中每帧扣 san
+r119: OnUpgrade() | ToolItem | 工具等级提升（T1→T3）
+r120: evidenceType | ClueItem | 证据类型枚举，用于恐鬼式证据匹配
+r121: OnCombine() | ClueItem | 线索合成新证据
+r122: OnPreview() / OnRollback() | ItemAction | 预测性 UI、撤销操作
+r123: ISaveable | 所有管理器 | 统一的存档接口，便于扩展新管理器
+r124: OnCustomGesture | SimpleInspectorUI | 复杂手势（双指旋转、长按）
+r125: requiredToolType | ItemAction | 动作执行需要特定工具装备
+r127: 七、核心代码库
+r129: 异步处理 | UniTask
+r130: 架构/解耦 | VContainer (Zenject)
+r131: 响应式数据 | R3
+r132: 补间动画 | DOTween (Pro)
+r133: 数据配置 | ScriptableObjects
+r134: 游戏引擎 | unity6000.1.17f1
+r136: Assest⏎  Project  //实际项目⏎  Samples  //测试样式⏎  ThirdParty  //第三方插件⏎Packages  //第三方插件
+r138: 除了管理器、基类、视觉小说系统，其余的脚本都应该使用命名空间
+r140: 可复用视觉小说系统 × MOM
+r142: 层级 | 核心职责 | 接入的管理器 | 不需要接入的管理器
+r143: 剧本数据层 | 存储所有配置数据 | 无（纯数据层） | 全部
+r144: 剧本引擎层 | 解析配置、控制播放、判断跳转 | FlagManager（查询条件） | GameManager（不感知）
+r145: SaveManager（自动存档） | UIManager（不感知）
+r146: AudioManager（不感知）
+r147: 其余全部
+r148: 桥接适配层 | 将引擎指令翻译为Manager操作 | UIManager（文字/立绘/选项UI） | SanityManager（引擎不直接调用）
+r149: CGMgr（背景/CG/特效） | InventoryManager（引擎不直接调用）
+r150: AudioManager（语音/BGM/SFX） | InteractionManager（引擎不直接调用）
+r151: SaveManager（存档触发） | BranchManager（只读）
+r152: FlagManager（写Flag）
+r153: SceneManager（场景切换）
+r154: EvidenceManager（任务进度）
+r155: GameLoopManager（模式切换）
+r156: 表现层 | 具体执行视觉/音频/UI呈现 | UIManager | 同上
+r157: CGMgr
+r158: AudioManager
+r159: SaveManager
+r161: 开发流程
+r163: MOM框架
+r164: ↓
+r165: 视觉小说系统
+r166: ↓
+r167: 序章
+===== SHEET: Sheet4  (rows=188 cols=8) =====
+r1: 八、可复用视觉小说系统
+r2: 能跑序章现在的所有内容——新闻播报、花屏、内心独白、联络员通讯、档案展示、装备检查
+r3: 能跑后续所有章节——因为后续会有大量类似的叙事段落
+r4: 能方便地扩展新功能——比如条件分支、选项肢、多结局统计、QTE
+r6: 剧本数据层（纯数据）
+r7: ChapterConfig.json / .asset / Excel导出
+r8: 包含：所有章节、序列、节点、角色、立绘、CG、音频
+r9: ↓
+r10: 剧本引擎层（可复用核心）
+r11: VNDirector / VNSequence / VNNode / VNBranch
+r12: 职责：解析数据、控制播放、管理跳转、执行特效
+r13: ↓
+r14: 桥接适配层（对接MOM）
+r15: VNBridge / VNChoiceBridge / VNEventBridge
+r16: 职责：将引擎指令翻译为Manager操作
+r17: ↓
+r18: 表现层（Managers + UI）
+r19: UIManager / CGMgr / AudioManager / FlagManager
+r20: 职责：响应指令，执行具体表现，不做逻辑判断
+r22: 核心原则：引擎层和表现层完全解耦。引擎只管「播到哪了」「下一步是什么」「要不要等玩家输入」「满足什么条件才能跳转」——它不知道也不关心背景图怎么切、音乐怎么渐变。桥接层负责翻译。
+r24: 剧本数据层设计
+r26: Chapter（章节）
+r27: └─ Sequence（段落）
+r28: └─ Node（节点）
+r29: └─ Block（块，可选，用于嵌套）
+r31: 节点代表一次完整的画面呈现。一个节点包含：
+r33: 文字内容
+r34: 说话人是谁（可以为空，表示旁白或叙述者）
+r35: 正文内容是什么
+r36: 内容是否需要打字机效果（逐字显示）
+r37: 打字速度（每字符多少秒）
+r39: 视觉呈现
+r40: 使用哪张背景图
+r41: 是否播放CG（CG优先级高于背景图）
+r42: 是否叠加屏幕特效（花屏、闪烁、抖动、淡入、淡出）
+r43: 是否显示立绘（哪个角色、第几个表情、从哪边进来）
+r44: 立绘位置（左、中、右）
+r46: 声音
+r47: 是否播放语音（哪个音频文件）
+r48: 语音结束后是否自动进入下一节点
+r49: 是否播放音效（比如花屏杂讯）
+r50: 是否切换BGM（切到哪首、如何过渡）
+r52: 逻辑控制
+r53: 这个节点播放完后要设置哪些flag
+r54: 是否需要等待玩家点击才能继续
+r55: 是否有条件判断（满足什么条件才播这个节点）
+r56: 下一节点是谁（默认按顺序，也可以显式指定）
+r58: 序列是一组节点的集合，代表一个完整的叙事段落。
+r60: 一个序列需要定义：
+r61: 这个序列叫什么（ID）
+r62: 序列播放前做什么（进入条件）
+r63: 包含哪些节点（按顺序）
+r64: 序列播放完后自动跳转到哪个序列（可以为空，表示序列结束交给外部处理）
+r65: 是否有结束条件（比如flag判断）
+r67: 章节是顶层容器
+r69: 一个章节需要定义：
+r70: 章节ID（用于存档和跳转）
+r71: 章节标题（显示用）
+r72: 入口序列（从哪个序列开始播放）
+r73: 章节内所有序列的列表
+r74: 章节开始前需要满足的条件
+r75: 章节结束后自动进入什么（下一个章节Scene？还是自由探索模式？）
+r77: 剧本引擎层设计
+r79: 核心职责
+r81: 维护当前播放状态
+r82: 当前在哪个章节
+r83: 当前在哪个序列
+r84: 当前在哪个节点
+r85: 当前是否在等待玩家输入
+r86: 当前是否正在播放自动序列（比如连续自动推进的花屏）
+r87: 当前有哪些flag可以查询
+r89: 解析节点，执行指令序列
+r90: 一个节点可能同时要求：切换背景 + 显示文字 + 播放语音 + 播放特效 + 设置flag + 切换音乐。
+r91: 这些操作需要按正确的顺序执行，有些可以并行（比如文字显示和BGM播放），有些必须等前一个完成（比如花屏必须等特效播完才能切到下一节点）。
+r93: 处理跳转逻辑
+r94: 按顺序播放下一个节点
+r95: 跳转到指定节点
+r96: 跳转到另一个序列
+r97: 跳转到另一个章节
+r98: 等待玩家选择（选项节点）
+r99: 等待外部信号（比如CG播放完毕）
+r100: 结束
+r102: 条件判断
+r103: 某个角色的隐藏对话只有在特定flag为true时才播放
+r104: 二周目时跳过序章直接进入
+r105: 某个选项选了A之后，后续序列走向不同
+r107: 节点执行流程
+r109: 第一步：条件检查
+r110: 检查这个节点是否有 条件 字段
+r111: 如果有，查询 FlagManager 判断是否满足
+r112: 满足 → 继续
+r113: 不满足 → 查找备选节点（elseNode 字段）或者跳过这个节点播下一个
+r115: 第二步：设置Flag（立即执行）
+r116: 把 设置Flag 列表里的所有flag写入FlagManager
+r117: 这步在视觉呈现之前就执行，确保后续逻辑能立即感知到变化
+r119: 第三步：背景与CG处理
+r120: 调用桥接脚本，切换背景图或播放CG
+r121: 如果有淡入淡出特效，等待过渡完成
+r122: 这里允许背景和CG同时存在——比如背景是新闻演播室，CG叠加一个花屏帧
+r124: 第四步：立绘处理
+r125: 根据节点里定义的立绘信息，调用桥接脚本显示/隐藏/切换立绘
+r126: 支持淡入淡出和滑入滑出动画
+r128: 第五步：声音处理
+r129: 播放语音（异步，不阻塞）
+r130: 播放音效
+r131: 切换BGM（异步，带crossfade）
+r133: 第六步：文字显示
+r134: 调用桥接脚本，把说话人和正文内容传给UIManager
+r135: 启动打字机效果（如果配置了）
+r136: 如果 自动继续: true，则在打字完成后自动进入下一节点
+r137: 如果 等待点击: true，则等待玩家点击才继续
+r139: 第七步：特效处理
+r140: 调用桥接脚本，播放节点里配置的所有特效
+r141: 某些特效需要阻塞（比如花屏0.3秒内禁止玩家点击）
+r142: 某些特效不阻塞（比如淡入淡出可以和其他内容并行）
+r144: 第八步：播放完毕，准备下一步
+r145: 如果是 等待点击 → 引擎进入「暂停」状态，等玩家输入
+r146: 如果是 自动继续 → 引擎自动计算下一节点并继续播放
+r147: 如果有 下一节点 显式指定 → 跳转到指定节点
+r148: 如果有 自动跳转序列 → 跳转到另一个序列的开头
+r150: 序列执行流程
+r152: 第一步：检查进入条件
+r153: 查询FlagManager
+r154: 不满足 → 跳过这个序列，播放下一个（或者报错，取决于配置）
+r156: 第二步：按顺序播放所有节点
+r157: 对每个节点执行「节点执行流程」
+r159: 第三步：处理序列结束
+r160: 如果有 自动跳转 → 播放下一个序列
+r161: 如果有 结束条件 → 判断是否满足，满足则结束章节
+r162: 如果都没有 → 向外部发送「序列播放完毕」信号，交给上层处理
+r164: 章节执行流程
+r166: 第一步：检查章节开始条件
+r167: 满足 → 加载章节数据，切换到对应Scene
+r168: 不满足 → 跳转到备选章节或显示提示
+r170: 第二步：执行入口序列
+r172: 第三步：序列完成后，处理章节结束行为
+r173: 可以跳转到下一个章节
+r174: 可以切换到自由探索模式
+r175: 可以显示结局画面
+r176: 可以自动存档
+r178: 选项与分支系统
+r180: 选项节点
+r182: 条件节点
+r184: 环与回溯
+r186: 存档
+r188: CG
+===== SHEET: Sheet2  (rows=439 cols=5) =====
+r1: 配置表
+r3: # | 配置表名称 | 数据结构 | 程序用途
+r4: 1 | GlobalConfig | SO | 全局常量（初始san=20、背包容量=9、收容箱=3、装备栏=3、工具耐久上限=5、初始装备ID列表）
+r5: 2 | SceneConfig | SO列表 | 每个场景的入口/出口配置、解锁条件、惩罚检查规则
+r6: 3 | InteractableConfig | SO列表 | 每个交互点的完整配置（见下详表）
+r7: 4 | ToolEffectConfig | SO查表 | 工具类型→效果ID→具体效果数据的映射表
+r8: 5 | BranchConfig | 内嵌于InteractableConfig | 伪人线概率、条件A/B阈值、判定结果（描述/贴图/音效/惩罚）
+r9: 6 | PenaltyConfigTable | SO | 6种惩罚的san扣除量、触发时机、视觉特效、音效ID
+r10: 7 | EvidenceConfig | SO | 证据ID、来源交互点、证据类型、所属目标、解锁内容
+r11: 8 | CGConfig | SO | CG双版本（伪人/人类）、触发条件、播放前后事件、是否可跳过
+r12: 9 | RecordingConfig | SO | 交互点→伪人线音频→人类线音频、时长、是否为证据
+r13: 10 | InteractableLinkageConfig | SO | 跨交互点联动（配电箱isPowerOff=true→天花板isCameraDisabled=true）
+r14: 11 | VisualEffectConfig | SO | 工具类型→效果动画→持续时间→替换资源路径
+r16: InteractableConfig 详细字段清单
+r17: 基础信息: interactableId, displayName, normalSprite, highlightedSprite
+r18: 描述: description(正常), anomalyDescription(异常)
+r19: 工具交互映射: List<ToolEffectEntry>
+r20:   └─ toolType / effectId / consumesDurability / durabilityCost / triggersBranch
+r21: 拾取物: associatedItemId / isCollectible
+r22: 惩罚: penaltyId / trigger(Pickup/Delayed/SceneExit/InspectorClose) / delaySeconds
+r23: 分支: anomalyChance / spriteOverride / actionOverride
+r24: 状态: initialActive / List<StateTransition>(工具→状态键→替换贴图→特效)
+r25: 联动: linkageRuleId
+r27: 各类核心函数清单
+r29: GameManager
+r31: # | 函数签名 | 访问级别 | 说明
+r32: 1 | void SwitchState(GameState newState) | public | 切换游戏状态，触发Enter/Exit生命周期
+r33: 2 | void RevertState() | public | 返回previousState
+r34: 3 | async UniTask StartNewGame() | public | 初始化管理器→删除存档→加载序幕场景
+r35: 4 | async UniTask ContinueGame() | public | 加载最新存档→恢复场景
+r36: 5 | async UniTask TriggerGameOver() | public | san归零→切换GameOver状态→播放CG
+r37: 6 | async UniTask TriggerVictory() | public | 收集3证据→设flag→播放结局CG
+r38: 7 | async UniTask QuickSave() | public | 调用SaveManager保存当前状态
+r39: 8 | async UniTask QuickLoad() | public | 调用SaveManager恢复存档
+r40: 9 | protected virtual void OnStateEnter(GameState) | protected | 子类重写，状态进入时执行
+r41: 10 | protected virtual void OnStateExit(GameState) | protected | 子类重写，状态退出时执行
+r42: — | GameState CurrentState | public get | 当前状态
+r43: — | GameState PreviousState | public get | 前一个状态
+r44: — | event Action<GameState, GameState> OnStateChanged | public | 状态切换事件
+r46: InteractionManager
+r48: # | 函数签名 | 访问级别 | 说明
+r49: 1 | void Register(SimpleInteractable) | public | 注册交互点
+r50: 2 | void Unregister(SimpleInteractable) | public | 注销交互点
+r51: 3 | void OnInteractableClicked(SimpleInteractable) | public | 点击交互点→切换Inspection→打开精查UI
+r52: 4 | void OnToolDragStarted(ToolItem, Vector2) | public | 工具开始拖拽→切换ToolDragging→显示指示器
+r53: 5 | void OnToolDragUpdated(Vector2) | public | 每帧更新→检测悬停→更新高亮状态
+r54: 6 | void OnToolDragEnded(Vector2) | public | 释放→执行工具交互/取消
+r55: 7 | void OnToolDragCancelled() | public | 取消拖拽（ESC或拖回原位）
+r56: 8 | void OnActionExecuted(ActionResult) | public | 动作执行完成回调
+r57: 9 | IReadOnlyList<SimpleInteractable> GetAllInteractables() | public | 获取所有活跃交互点
+r58: 10 | SimpleInteractable GetInteractableUnderPoint(Vector2) | private | 射线检测获取鼠标下的交互点
+r59: 11 | bool CanUseToolOn(SimpleInteractable, ToolItem) | private | 检查工具是否能作用于目标
+r60: 12 | void ExecuteToolInteraction(ToolItem, SimpleInteractable) | private | 执行工具→查表→消耗耐久→效果→flag
+r61: — | ToolDragContext currentToolDrag | private | 当前拖拽上下文
+r63: UIManager
+r65: # | 函数签名 | 访问级别 | 说明
+r66: 1 | void ShowPanel(string panelId) | public | 显示面板
+r67: 2 | void HidePanel(string panelId) | public | 隐藏面板
+r68: 3 | void HideAllPanels() | public | 隐藏所有面板
+r69: 4 | void ShowInspector(Item, SimpleInteractable) | public | 打开精查UI
+r70: 5 | void HideInspector() | public | 关闭精查UI
+r71: 6 | void UpdateInspectorContent(Item) | public | 更新精查内容
+r72: 7 | void ShowToolDragIndicator(Sprite, Vector2) | public | 显示工具拖拽跟随图标
+r73: 8 | void UpdateToolDragIndicator(Vector2) | public | 更新拖拽图标位置
+r74: 9 | void HideToolDragIndicator() | public | 隐藏拖拽指示器
+r75: 10 | void ShowToolValidity(bool) | public | 显示工具使用是否有效
+r76: 11 | void UpdateSanDisplay(int current, int max) | public | HUD san值显示
+r77: 12 | void UpdateEvidenceDisplay(int current, int goal) | public | HUD证据计数显示
+r78: 13 | void UpdateContainmentDisplay(int, int) | public | HUD收容箱容量显示
+r79: 14 | void UpdateEquipmentSlots(ToolItem[]) | public | 更新装备栏UI
+r80: 15 | void PlaySanDamageEffect(int amount) | public | san扣除时的屏幕红闪+震动
+r81: 16 | void PlayGlitchEffect(float duration) | public | 花屏干扰效果
+r82: 17 | void UpdateVignetteBySan(int, int) | public | 根据san值更新暗角强度
+r83: 18 | void PlayScreenShake(float, float) | public | 屏幕震动
+r84: 19 | void ShowHint(string, float duration) | public | 显示临时提示文本
+r85: 20 | void ShowToolHint(string tool, string target, bool) | public | 工具悬停提示
+r86: 21 | void PlaySceneTransition(string type) | public | 场景过渡效果（fade/glitch/black）
+r87: — | event Action<string> OnPanelShown/Hidden | public | 面板事件
+r89: SanityManager
+r91: # | 函数签名 | 访问级别 | 说明
+r92: 1 | async UniTask Initialize(int initialValue) | public | 初始化san值
+r93: 2 | async UniTask ReduceSan(int amount, string penaltyId) | public | 扣san→UI特效→音效→检查归零
+r94: 3 | void RestoreSan(int amount) | public | 恢复san→UI更新→提示
+r95: 4 | void SetMaxSanity(int) | public | 设置上限
+r96: 5 | async UniTask ProcessPenalty(string penaltyId) | public | 处理立即惩罚
+r97: 6 | async UniTask ProcessDelayedPenalty(string, float delay) | public | 处理延迟惩罚（3秒倒计时）
+r98: 7 | async UniTask ProcessAlertPenalty() | public | 跨场景警报惩罚检查
+r99: 8 | async UniTask ProcessUncontainedPenalty(string) | public | 未收容惩罚检查→收容箱中无此物则扣san
+r100: 9 | bool IsCritical() | public | san<30%为危险
+r101: 10 | bool IsGameOver() | public | 是否已触发游戏结束
+r102: 11 | SanitySaveData GetSaveData() | public | 获取存档数据
+r103: 12 | async UniTask LoadState(SanitySaveData) | public | 恢复存档状态
+r104: — | int CurrentSanity / MaxSanity / float SanityRatio | public get | 属性
+r105: — | event Action<int, int> OnSanityChanged | public | san变化事件
+r106: — | event Action OnSanityDepleted | public | san归零事件
+r107: — | event Action<int> OnSanityLow | public | san<30%事件
+r109: InventoryManager
+r111: # | 函数签名 | 访问级别 | 说明
+r112: 1 | async UniTask Initialize() | public | 清空背包/收容箱/装备栏
+r113: 2 | bool AddToBackpack(Item) | public | 添加到背包（容量检查）
+r114: 3 | bool RemoveFromBackpack(string itemId) | public | 从背包移除
+r115: 4 | Item GetFromBackpack(string itemId) | public | 从背包获取
+r116: 5 | IReadOnlyList<Item> GetBackpackItems() | public | 获取背包所有物品
+r117: 6 | bool IsBackpackFull() | public | 背包是否已满
+r118: 7 | bool AddToContainment(ClueItem) | public | 添加到收容箱（异常线索专用）
+r119: 8 | bool RemoveFromContainment(string itemId) | public | 从收容箱移除
+r120: 9 | IReadOnlyList<ClueItem> GetContainmentItems() | public | 获取收容箱所有物品
+r121: 10 | bool IsContainmentFull() | public | 收容箱是否已满
+r122: 11 | bool IsInContainment(string itemId) | public | 查询物品是否在收容箱中
+r123: 12 | bool EquipTool(ToolItem, int slotIndex) | public | 装备工具到指定栏位
+r124: 13 | bool UnequipTool(int slotIndex) | public | 卸下指定栏位工具
+r125: 14 | bool SwapTool(int from, int to) | public | 交换两个栏位的工具
+r126: 15 | ToolItem GetEquippedTool(int) | public | 获取指定栏位工具
+r127: 16 | IReadOnlyList<ToolItem> GetEquippedTools() | public | 获取所有已装备工具
+r128: 17 | bool IsToolEquipped(string toolId) | public | 查询工具是否已装备
+r129: 18 | void AddRecording(RecordedAudio) | public | 添加录音
+r130: 19 | IReadOnlyList<RecordedAudio> GetRecordings() | public | 获取所有录音
+r131: 20 | RecordedAudio GetRecording(string recordingId) | public | 获取指定录音
+r132: 21 | Item GetItem(string itemId) | public | 全局查询（背包/收容箱/装备栏）
+r133: 22 | bool HasItem(string itemId) | public | 全局查询是否存在
+r134: 23 | int GetTotalItemCount() | public | 全部道具总数
+r135: 24 | InventorySaveData GetSaveData() | public | 获取存档数据
+r136: 25 | async UniTask LoadState(InventorySaveData) | public | 恢复存档状态
+r137: — | ToolItem DraggingTool { get; set; } | public | 当前拖拽中的工具
+r138: — | event Action<Item> OnItemAdded | public | 物品添加事件
+r139: — | event Action<string> OnItemRemoved | public | 物品移除事件
+r140: — | event Action<ToolItem, int> OnToolEquipped | public | 工具装备事件
+r141: — | event Action<int> OnToolUnequipped | public | 工具卸下事件
+r143: FlagManager
+r145: # | 函数签名 | 访问级别 | 说明
+r146: 1 | void Set(string flagId, bool/int/float/string) | public | 设置标志位
+r147: 2 | T Get<T>(string flagId, T defaultValue) | public | 泛型读取
+r148: 3 | bool GetBool(string, bool defaultValue) | public | 读取bool
+r149: 4 | int GetInt(string, int defaultValue) | public | 读取int
+r150: 5 | void SetMultiple(Dictionary<string, object>) | public | 批量设置
+r151: 6 | bool CheckAll(Dictionary<string, object>) | public | 全部条件满足
+r152: 7 | bool CheckAny(Dictionary<string, object>) | public | 任一条件满足
+r153: 8 | bool IsSet(string flagId) | public | 是否已设置
+r154: 9 | void Unset(string flagId) | public | 取消设置
+r155: 10 | void Toggle(string flagId) | public | 取反
+r156: 11 | IReadOnlyList<string> GetAllFlagIds() | public | 获取所有flag
+r157: 12 | string ExportToJson() | public | 导出为JSON（调试）
+r158: 13 | void ImportFromJson(string) | public | 从JSON导入（调试）
+r159: 14 | FlagSaveData GetSaveData() | public | 获取存档数据
+r160: 15 | void LoadState(FlagSaveData) | public | 恢复存档状态
+r161: 16 | void ClearAll() | public | 清除所有标志位
+r163: BranchManager
+r165: # | 函数签名 | 访问级别 | 说明
+r166: 1 | void Initialize(int baseSeed) | public | 初始化随机种子
+r167: 2 | void RestoreFromSeed(int) | public | 读档时恢复种子
+r168: 3 | int GetCurrentSeed() | public | 获取当前种子
+r169: 4 | void RegisterTemperature(string, float) | public | 注册温度数据（供判定用）
+r170: 5 | void RegisterEMF(string, int) | public | 注册EMF数据（供判定用）
+r171: 6 | void RegisterUVResult(string, bool) | public | 注册紫外线检测结果
+r172: 7 | void RegisterAudioResult(string, AudioType) | public | 注册录音结果
+r173: 8 | string ResolveBranch(string, BranchConfig) | public | 执行分支判定→返回"anomaly"/"normal"
+r174: 9 | string GetResolvedBranch(string) | public | 获取已判定的分支结果
+r175: 10 | bool IsBranchResolved(string) | public | 是否已判定
+r176: 11 | float GetTemperature(string) | public | 获取温度数据
+r177: 12 | int GetEMF(string) | public | 获取EMF数据
+r178: 13 | void ResetBranch(string) | public | 重置单个分支（读档用）
+r179: 14 | void ResetAllBranches() | public | 重置所有分支
+r180: 15 | BranchSaveData GetSaveData() | public | 获取存档数据
+r181: 16 | void LoadState(BranchSaveData) | public | 恢复存档状态
+r183: EvidenceManager
+r185: # | 函数签名 | 访问级别 | 说明
+r186: 1 | void Initialize(int goalCount) | public | 初始化证据目标数量
+r187: 2 | void OnItemCollected(Item) | public | 物品被拾取时调用→自动判断是否为证据
+r188: 3 | bool AddEvidence(string evidenceId) | public | 添加证据（防重复）
+r189: 4 | int CurrentCount { get; } | public | 当前证据数量
+r190: 5 | int GoalCount { get; } | public | 目标证据数量
+r191: 6 | float Progress { get; } | public | 完成度0~1
+r192: 7 | bool IsGoalReached() | public | 是否达成目标
+r193: 8 | bool HasEvidence(string evidenceId) | public | 是否已拥有该证据
+r194: 9 | IReadOnlyList<string> GetCollectedEvidenceIds() | public | 获取已收集证据ID列表
+r195: 10 | void CheckGoals() | public | 检查目标达成→触发解锁事件
+r196: 11 | EvidenceSaveData GetSaveData() | public | 获取存档数据
+r197: 12 | void LoadState(EvidenceSaveData) | public | 恢复存档状态
+r198: — | event Action<int, int> OnEvidenceCollected | public | 证据收集事件
+r199: — | event Action OnGoalReached | public | 目标达成事件
+r201: SaveManager
+r203: # | 函数签名 | 访问级别 | 说明
+r204: 1 | async UniTask SaveAsync(string slotId) | public | 保存到指定槽位
+r205: 2 | async UniTask<SaveData> LoadAsync(string slotId) | public | 从指定槽位加载
+r206: 3 | async UniTask<SaveData> LoadLatestAsync() | public | 加载最新存档
+r207: 4 | bool HasSave(string slotId) | public | 槽位是否有存档
+r208: 5 | bool HasAnySave() | public | 是否存在任何存档
+r209: 6 | List<SaveSlotInfo> GetAllSaveSlots() | public | 获取所有存档槽信息
+r210: 7 | async UniTask DeleteSave(string slotId) | public | 删除存档
+r211: 8 | async UniTask DeleteAllSaves() | public | 删除所有存档
+r212: 9 | async UniTask QuickSaveAsync() | public | 快速保存
+r213: 10 | async UniTask<SaveData> QuickLoadAsync() | public | 快速加载
+r214: 11 | bool HasQuickSave() | public | 是否有快速存档
+r215: 12 | SaveData CreateSaveData() | public | 收集所有管理器数据
+r216: 13 | void ApplySaveData(SaveData) | public | 分发存档数据给各管理器
+r218: SaveData 结构清单
+r220: saveId / saveName / saveTime / currentScene
+r221: sanity: current / max
+r222: inventory: backpackItems / containmentItems / equippedTools / recordings
+r223: flags: Dictionary<string, object>
+r224: branches: Dictionary<string, string> / currentSeed
+r225: evidence: collectedIds / currentCount / goalCount
+r226: collectedInteractableIds: List<string>
+r227: destroyedInteractableIds: List<string>
+r228: interactableStates: Dictionary<string, string> // id→JSON state
+r229: playTime / chapterIndex
+r231: AudioManager
+r233: # | 函数签名 | 访问级别 | 说明
+r234: 1 | void PlayBGM(string bgmId, float fadeDuration) | public | 播放BGM
+r235: 2 | void StopBGM(float fadeDuration) | public | 停止BGM
+r236: 3 | void PauseBGM() | public | 暂停BGM
+r237: 4 | void ResumeBGM() | public | 恢复BGM
+r238: 5 | void PlayAmbience(string, float fadeDuration) | public | 播放环境音
+r239: 6 | void StopAmbience(float fadeDuration) | public | 停止环境音
+r240: 7 | void PlaySFX(string sfxId, float volume) | public | 播放2D音效
+r241: 8 | void PlaySFX(string sfxId, Vector3 position) | public | 播放3D音效
+r242: 9 | void StopSFX(string sfxId) | public | 停止指定音效
+r243: 10 | void StopAllSFX() | public | 停止所有音效
+r244: 11 | void PlayRecording(RecordedAudio) | public | 播放录音
+r245: 12 | void StopRecording() | public | 停止录音播放
+r246: 13 | void SetSanityParameter(int sanity, int maxSanity) | public | san值联动参数调整
+r247: 14 | void PlayToolEffect(ToolType, string effectId) | public | 播放工具特效音
+r248: 15 | void SetMasterVolume(float) | public | 主音量
+r249: 16 | void SetBGMVolume(float) | public | BGM音量
+r250: 17 | void SetSFXVolume(float) | public | 音效音量
+r252: SceneManager
+r254: # | 函数签名 | 访问级别 | 说明
+r255: 1 | async UniTask LoadScene(string sceneId, string transitionType) | public | 加载场景（支持过渡）
+r256: 2 | async UniTask ReloadCurrentScene() | public | 重新加载当前场景
+r257: 3 | float LoadingProgress { get; } | public | 加载进度0~1
+r258: 4 | bool IsLoading { get; } | public | 是否正在加载
+r259: 5 | void RegisterPersistentObject(GameObject) | public | 注册DontDestroyOnLoad对象
+r260: 6 | void UnregisterPersistentObject(GameObject) | public | 注销持久对象
+r261: 7 | string CurrentSceneId { get; } | public | 当前场景ID
+r262: 8 | IReadOnlyList<string> GetLoadedSceneIds() | public | 获取已加载场景列表
+r263: — | event Action<string> OnSceneLoaded | public | 场景加载完成事件
+r264: — | event Action<float> OnLoadingProgress | public | 加载进度事件
+r266: CGMgr
+r268: # | 函数签名 | 访问级别 | 说明
+r269: 1 | async UniTask PlayCG(string cgId) | public | 播放CG（自动选择版本）
+r270: 2 | async UniTask PlayCG(string cgId, string branch) | public | 播放指定分支版本的CG
+r271: 3 | void SkipCG() | public | 跳过CG
+r272: 4 | void CloseCG() | public | 关闭CG
+r273: 5 | bool IsPlaying { get; } | public | 是否正在播放
+r274: 6 | void PreloadCG(string cgId) | public | 预加载CG资源
+r275: 7 | void PreloadAllCGs() | public | 预加载所有CG
+r276: 8 | string CurrentCGId { get; } | public | 当前播放的CG ID
+r277: — | event Action<string> OnCGStarted | public | CG开始事件
+r278: — | event Action<string> OnCGEnded | public | CG结束事件
+r279: — | event Action OnCGSkipped | public | CG跳过事件
+r281: GameLoopManager
+r283: # | 函数签名 | 访问级别 | 说明
+r284: 1 | void StartLevel(string levelId) | public | 开始关卡
+r285: 2 | void PauseLevel() | public | 暂停关卡
+r286: 3 | void ResumeLevel() | public | 恢复关卡
+r287: 4 | void EndLevel(bool success) | public | 结束关卡
+r288: 5 | void StartTimer() | public | 开始计时
+r289: 6 | void PauseTimer() | public | 暂停计时
+r290: 7 | void ResetTimer() | public | 重置计时器
+r291: 8 | float ElapsedTime { get; } | public | 已用时间
+r292: 9 | float TimeLimit { get; } | public | 时间上限
+r293: 10 | bool IsTimeUp { get; } | public | 是否超时
+r294: 11 | string CurrentLevelId { get; } | public | 当前关卡ID
+r295: 12 | bool IsRunning { get; } | public | 是否运行中
+r296: — | event Action OnLevelStart | public | 关卡开始事件
+r297: — | event Action OnLevelPause/Resume | public | 暂停/恢复事件
+r298: — | event Action<bool> OnLevelEnd | public | 关卡结束事件
+r299: — | event Action OnTimeUp | public | 超时事件
+r300: — | event Action<float> OnTimerTick | public | 每秒计时事件
+r302: 道具类核心函数清单
+r304: Item（抽象基类）
+r306: # | 成员 | 类型 | 说明
+r307: 1 | string itemId | 字段 | 道具唯一ID
+r308: 2 | string displayName | 字段 | 显示名称
+r309: 3 | Sprite icon | 字段 | 图标
+r310: 4 | string description | 字段 | 描述文本
+r311: 5 | Dictionary<DragDirection, ItemAction> directionActions | 字段 | 方向→动作映射
+r312: 6 | ItemAction inspectAction | 字段 | 检查动作引用
+r313: 7 | ItemAction discardAction | 字段 | 丢弃动作引用
+r314: 8 | abstract List<AvailableAction> GetAvailableActions() | 抽象方法 | 返回可用动作列表
+r315: 9 | virtual void ExecuteAction(DragDirection) | 虚方法 | 执行指定方向的动作
+r316: 10 | virtual void OnPickup() | 虚方法 | 拾取回调
+r317: 11 | virtual void OnDiscard() | 虚方法 | 丢弃回调
+r318: 12 | virtual void OnInspect() | 虚方法 | 检查回调
+r320: ClueItem（线索道具）
+r322: # | 成员 | 类型 | 说明
+r323: 1 | bool isAnomaly | 字段 | 是否为伪人线线索
+r324: 2 | bool requiresContainment | 字段 | 是否必须进入收容箱
+r325: 3 | EvidenceType evidenceType | 字段 | 证据类型枚举
+r326: 4 | string evidenceId | 字段 | 对应证据ID
+r327: 5 | override void OnPickup() | 重写方法 | 异常线索→强制进入收容箱
+r328: 6 | override void OnDiscard() | 重写方法 | 异常线索→扣san值
+r329: 7 | override void OnInspect() | 重写方法 | 根据isAnomaly显示不同描述
+r330: 8 | override List<AvailableAction> GetAvailableActions() | 重写方法 | 异常→收容/检查/丢弃；正常→拾取/检查/丢弃
+r332: ToolItem（工具道具）
+r334: # | 成员 | 类型 | 说明
+r335: 1 | int durability | 字段 | 当前耐久
+r336: 2 | int maxDurability | 字段 | 最大耐久
+r337: 3 | ToolType toolType | 字段 | 工具类型枚举
+r338: 4 | int equippedSlotIndex | 字段 | 装备栏索引（-1=未装备）
+r339: 5 | override void OnEquip() | 重写方法 | 更新装备栏UI→通知InteractionManager
+r340: 6 | override void OnUnequip() | 重写方法 | 从装备栏移除→更新UI
+r341: 7 | ToolUseResult Use() | 方法 | 消耗耐久→检查耗尽→设flag
+r342: 8 | ToolUseResult UseOnInteractable(SimpleInteractable) | 方法 | 工具对交互点使用→查表→返回数值/视觉变化
+r343: 9 | override List<AvailableAction> GetAvailableActions() | 重写方法 | 未装备→装备/检查/丢弃；已装备→卸下/检查/丢弃
+r345: ToolUseResult（返回值结构）
+r347: bool success
+r348: string reason
+r349: float floatValue  // 温度
+r350: int intValue      // EMF等级
+r351: bool needsMoreInput // 是否需要后续输入（如播放CG）
+r353: 动作类核心函数清单
+r355: ItemAction（抽象基类）
+r357: # | 成员 | 类型 | 说明
+r358: 1 | string actionId | 字段 | 动作唯一ID
+r359: 2 | string displayName | 字段 | 显示名称（如"拾取"）
+r360: 3 | Sprite icon | 字段 | 方向图标
+r361: 4 | abstract bool CanExecute(Item, SimpleInteractable) | 抽象方法 | 执行前检查（容量/耐久/san等）
+r362: 5 | abstract async UniTask Execute(Item, SimpleInteractable) | 抽象方法 | 执行业务逻辑
+r363: 6 | virtual string GetFailureReason(Item, SimpleInteractable) | 虚方法 | 返回失败原因文本
+r365: PickupAction
+r367: # | 步骤 | 调用管理器
+r368: 1 | CanExecute检查→背包/收容箱是否有空位 | InventoryManager.IsBackpackFull / IsContainmentFull
+r369: 2 | Execute→调用item.OnPickup() | Item.OnPickup
+r370: 3 | 添加到背包或收容箱 | InventoryManager.AddToBackpack / AddToContainment
+r371: 4 | 禁用场景交互点 | InteractionManager (通过source.SetCollected)
+r372: 5 | 设置拾取flag | FlagManager.Set($"picked_{itemId}")
+r373: 6 | 检查证据 | EvidenceManager.OnItemCollected
+r374: 7 | 如果异常线索→启动3秒惩罚倒计时 | SanityManager.ProcessDelayedPenalty
+r376: DiscardAction
+r378: # | 步骤 | 调用管理器
+r379: 1 | 获取item当前位置（背包/收容箱/装备栏） | InventoryManager.GetItem
+r380: 2 | 从当前位置移除 | InventoryManager.RemoveFromBackpack等
+r381: 3 | 调用item.OnDiscard() | Item.OnDiscard
+r382: 4 | 设置丢弃flag | FlagManager.Set($"discarded_{itemId}")
+r384: EquipAction
+r386: # | 步骤 | 调用管理器
+r387: 1 | CanExecute检查→装备栏是否有空位 | InventoryManager.IsEquipmentSlotEmpty
+r388: 2 | 装备到指定栏位 | InventoryManager.EquipTool
+r389: 3 | 调用item.OnEquip() | Item.OnEquip
+r390: 4 | 更新装备栏UI | UIManager.UpdateEquipmentSlots
+r391: 5 | 通知InteractionManager工具已装备 | InteractionManager（事件）
+r392: 6 | 设置装备flag | FlagManager.Set($"equipped_{itemId}")
+r394: UseToolAction
+r396: # | 步骤 | 调用管理器
+r397: 1 | 获取当前装备的工具 | InventoryManager.GetEquippedTool
+r398: 2 | 消耗耐久 | ToolItem.Use()
+r399: 3 | 在交互点上执行工具效果 | ToolItem.UseOnInteractable
+r400: 4 | 根据返回结果→触发分支判定/视觉变化 | BranchManager.RegisterXxx / ResolveBranch
+r401: 5 | 播放工具特效音 | AudioManager.PlayToolEffect
+r402: 6 | 如果需要→播放CG | CGMgr.PlayCG
+r403: 7 | 持久化交互点状态变化 | FlagManager / InteractableState
+r404: 8 | 触发跨交互点联动 | InteractableLinkageConfig
+r406: UseConsumableAction
+r408: # | 步骤 | 调用管理器
+r409: 1 | 检查是否是消耗品 | Item类型判断
+r410: 2 | 恢复san值 | SanityManager.RestoreSan
+r411: 3 | 从背包移除道具 | InventoryManager.RemoveFromBackpack
+r412: 4 | 播放恢复音效 | AudioManager.PlaySFX
+r414: InspectAction
+r416: # | 步骤 | 调用管理器
+r417: 1 | 调用item.OnInspect() | Item.OnInspect
+r418: 2 | 显示详细描述UI | UIManager.ShowInspectorDetail
+r419: 3 | 检查是否首次检查→设flag | FlagManager.CheckAll / Set
+r420: 4 | 如果是证据→更新证据UI | UIManager.UpdateEvidenceDisplay
+r422: SimpleInteractable 组件清单
+r424: # | 成员 | 类型 | 说明
+r425: 1 | string interactableId | 字段 | 交互点唯一ID
+r426: 2 | Item item | 字段 | 关联的道具实例
+r427: 3 | InteractableConfig config | 字段 | 配置数据引用
+r428: 4 | Dictionary<string, bool> currentState | 字段 | 当前运行时状态
+r429: 5 | bool isCollected | 字段 | 是否已被拾取
+r430: 6 | bool isDestroyed | 字段 | 是否已被破坏
+r431: 7 | bool IsInteractable { get; } | 属性 | 是否可交互
+r432: 8 | void SetCollected() | 方法 | 标记为已拾取→隐藏渲染
+r433: 9 | void SetDestroyed() | 方法 | 标记为已破坏→隐藏渲染
+r434: 10 | void SetHighlight(bool, bool toolValid) | 方法 | 设置高亮状态
+r435: 11 | ToolEffectEntry GetToolEffect(ToolType) | 方法 | 获取工具效果配置
+r436: 12 | string GetToolEffectId(ToolType) | 方法 | 获取效果ID
+r437: 13 | void ApplyToolEffect(ToolType) | 方法 | 应用工具效果→状态变化→视觉替换
+r438: 14 | bool HasToolEffect(ToolType) | 方法 | 是否有对应工具效果
+r439: 15 | Sprite GetCurrentSprite() | 方法 | 根据状态返回当前贴图
+===== SHEET: Sheet3  (rows=148 cols=6) =====
+r1: 配置阶段
+r3: 序号 | 触发源 | 调用的管理器 | 具体函数调用链 | 需要桥接
+r4: 1 | SceneManager | GameManager | GameManager.SwitchState(GameState.Init) | —
+r5: 2 | SceneManager | GameLoopManager | GameLoopManager.StartLevel("stage2_breach") | UIManager（显示加载进度）
+r6: 3 | SceneManager | InteractionManager | InteractionManager.Register(SimpleInteractable) × 3 | —
+r7: 4 | SceneManager | InventoryManager | InventoryManager.Initialize() | —
+r8: 5 | SceneManager | InventoryManager | InventoryManager.EquipTool(ToolItem, slotIndex) × 3 | UIManager.UpdateEquipmentSlots
+r9: 6 | SceneManager | SanityManager | SanityManager.Initialize(20) | UIManager.UpdateSanDisplay
+r10: 7 | SceneManager | EvidenceManager | EvidenceManager.Initialize(3) | UIManager.UpdateEvidenceDisplay
+r11: 8 | SceneManager | FlagManager | FlagManager.SetMultiple(...) 初始化关卡flag | —
+r12: 9 | GameLoopManager | UIManager | UIManager.PlaySceneTransition("fade") | —
+r13: 10 | GameManager | GameManager | GameManager.SwitchState(GameState.Exploration) | InteractionManager（解除暂停）、AudioManager（播放环境音）、CGMgr（关闭）
+r14: 11 | AudioManager | — | AudioManager.PlayAmbience("rain_night_backyard", 2.0f) | —
+r15: 12 | UIManager | — | UIManager.UpdateSanDisplay(20, 20) | —
+r16: 13 | UIManager | — | UIManager.UpdateEvidenceDisplay(0, 3) | —
+r18: 配电箱
+r20: 点击配电箱
+r22: 序号 | 触发源 | 调用的管理器 | 具体函数调用链 | 需要桥接
+r23: 1 | 玩家点击 | InteractionManager | InteractionManager.OnInteractableClicked(配电箱) | —
+r24: 2 | InteractionManager | GameManager | GameManager.SwitchState(GameState.Inspection) | InteractionManager（暂停其他交互）
+r25: 3 | InteractionManager | UIManager | UIManager.ShowInspector(null, 配电箱SimpleInteractable) | —
+r26: 4 | InteractionManager | — | UIManager.UpdateToolValidity(true)（工具包有效） | —
+r27: 5 | UIManager | — | UIManager.ShowToolHint("使用工具包", "打开配电箱", true) | —
+r29: 拖拽工具包
+r31: 序号 | 触发源 | 调用的管理器 | 具体函数调用链 | 需要桥接
+r32: 1 | 玩家拖拽开始 | InteractionManager | InteractionManager.OnToolDragStarted(工具包, position) | UIManager.ShowToolDragIndicator
+r33: 2 | 玩家拖拽中 | InteractionManager | InteractionManager.OnToolDragUpdated(position) | UIManager.UpdateToolDragIndicator
+r34: 3 | 玩家释放 | InteractionManager | InteractionManager.CanUseToolOn(配电箱, 工具包) → true | —
+r35: 4 | InteractionManager | — | InteractionManager.ExecuteToolInteraction(工具包, 配电箱) | —
+r36: 5 | InteractionManager | ToolItem | 工具包.Use() | —
+r37: 6 | ToolItem | — | 工具包.durability -= 1 → 4 | UIManager.UpdateEquipmentSlots
+r38: 7 | InteractionManager | BranchManager | BranchManager.RegisterTemperature("配电箱", 随机值) | —
+r39: 8 | InteractionManager | BranchManager | BranchManager.ResolveBranch("配电箱", BranchConfig) → 返回分支结果 | —
+r40: 9 | InteractionManager | SimpleInteractable | 配电箱.ApplyToolEffect(ToolType.ToolKit) | —
+r41: 10 | InteractionManager | FlagManager | FlagManager.Set("配电箱_powerOff", true) | —
+r42: 11 | InteractionManager | FlagManager | FlagManager.Set("配电箱_工具包已使用", true) | —
+r43: 12 | InteractionManager | — | 联动规则触发：FlagManager.Set("天花板_cameraDisabled", true) | —
+r44: 13 | InteractionManager | AudioManager | AudioManager.PlayToolEffect(ToolType.ToolKit, "配电箱打开") | —
+r45: 14 | InteractionManager | AudioManager | AudioManager.PlaySFX("electric_shutoff", volume) | —
+r46: 15 | InteractionManager | UIManager | UIManager.ShowHint("警报已屏蔽", 2.0f) | —
+r47: 16 | InteractionManager | InteractionManager | 配电箱.SetInteractionState("opened") | UIManager（更新交互点外观）
+r48: 17 | InteractionManager | InteractionManager | InteractionManager.OnActionExecuted(ActionResult.Success) | —
+r49: 18 | InteractionManager | UIManager | UIManager.HideToolDragIndicator() | —
+r50: 19 | InteractionManager | GameManager | GameManager.SwitchState(GameState.Exploration) | InteractionManager（恢复交互）
+r52: 花坛手表（交互模板）
+r54: 点击花坛
+r56: 序号 | 触发源 | 调用的管理器 | 具体函数调用链 | 需要桥接
+r57: 1 | 玩家点击 | InteractionManager | InteractionManager.OnInteractableClicked(花坛手表) | —
+r58: 2 | InteractionManager | GameManager | GameManager.SwitchState(GameState.Inspection) | —
+r59: 3 | InteractionManager | UIManager | UIManager.ShowInspector(手表Item, 花坛SimpleInteractable) | —
+r61: 拖拽温度计 → 花坛
+r63: 序号 | 触发源 | 调用的管理器 | 具体函数调用链 | 需要桥接
+r64: 1 | 玩家释放 | InteractionManager | InteractionManager.ExecuteToolInteraction(温度计, 花坛) | —
+r65: 2 | InteractionManager | ToolItem | 温度计.Use() | —
+r66: 3 | ToolItem | — | 温度计.durability -= 1 | UIManager.UpdateEquipmentSlots
+r67: 4 | InteractionManager | BranchManager | BranchManager.RegisterTemperature("花坛手表", 8.0f) | —
+r68: 5 | BranchManager | — | 随机数判定 → 8℃ → 触发伪人线索分支 | —
+r69: 6 | InteractionManager | UIManager | UIManager.ShowToolResult("温度：8℃", 异常高亮) | —
+r70: 7 | InteractionManager | FlagManager | FlagManager.Set("花坛手表_温度异常", true) | —
+r71: 8 | InteractionManager | AudioManager | AudioManager.PlayToolEffect(ToolType.Thermometer, "低温警报") | —
+r72: 9 | InteractionManager | InteractionManager | InteractionManager.OnActionExecuted(ActionResult.Success) | —
+r74: 玩家拖拽探测器 → 花坛
+r76: 序号 | 触发源 | 调用的管理器 | 具体函数调用链 | 需要桥接
+r77: 1 | 玩家释放 | InteractionManager | InteractionManager.ExecuteToolInteraction(探测器, 花坛) | —
+r78: 2 | InteractionManager | ToolItem | 探测器.Use() | —
+r79: 3 | ToolItem | — | 探测器.durability -= 1 | UIManager.UpdateEquipmentSlots
+r80: 4 | InteractionManager | BranchManager | BranchManager.RegisterEMF("花坛手表", 4) | —
+r81: 5 | BranchManager | — | 伪人分支已确定 → EMF4级 → 异常确认 | —
+r82: 6 | InteractionManager | FlagManager | FlagManager.Set("花坛手表_EMF4级", true) | —
+r83: 7 | InteractionManager | FlagManager | FlagManager.Set("花坛手表_异常确定", true) | —
+r84: 8 | InteractionManager | AudioManager | AudioManager.PlayToolEffect(ToolType.Detector, "emf_alert") | —
+r85: 9 | InteractionManager | UIManager | UIManager.PlayGlitchEffect(0.3f) | —
+r86: 10 | InteractionManager | UIManager | UIManager.ShowToolResult("EMF等级：4", 异常高亮) | —
+r87: 11 | InteractionManager | AudioManager | AudioManager.PlaySFX("glass_break", position)（远处传来玻璃破碎声） | —
+r88: 12 | InteractionManager | UIManager | UIManager.ShowHint("异常信号！请收容物品", 2.0f) | —
+r89: 13 | InteractionManager | InteractionManager | InteractionManager.OnActionExecuted(ActionResult.Success) | —
+r91: 点击花坛打开精查 → 向下滑动「拾取」
+r93: 序号 | 触发源 | 调用的管理器 | 具体函数调用链 | 需要桥接
+r94: 1 | 玩家点击 | InteractionManager | InteractionManager.OnInteractableClicked(花坛手表)（重新打开精查） | —
+r95: 2 | InteractionManager | UIManager | UIManager.ShowInspector(手表ClueItem, 花坛) | —
+r96: 3 | 玩家拖拽手表 → 上方向（拾取） | UIManager | 检测拖拽方向 → 调用 手表ClueItem.ExecuteAction(DragDirection.Up) | —
+r97: 4 | ClueItem | — | 查找 directionActions[DragDirection.Up] → PickupAction | —
+r98: 5 | PickupAction | InventoryManager | InventoryManager.IsContainmentFull() → false | —
+r99: 6 | PickupAction | ClueItem | ClueItem.OnPickup() | —
+r100: 7 | ClueItem | — | ClueItem.isAnomaly = true → 强制收容流程 | —
+r101: 8 | PickupAction | InventoryManager | InventoryManager.AddToContainment(手表ClueItem) | UIManager.UpdateContainmentDisplay
+r102: 9 | PickupAction | InteractionManager | InteractionManager.OnCollected(花坛手表) | —
+r103: 10 | InteractionManager | SimpleInteractable | 花坛手表.SetCollected() | UIManager（隐藏交互点）
+r104: 11 | PickupAction | FlagManager | FlagManager.Set("picked_手表_clue") | —
+r105: 12 | PickupAction | EvidenceManager | EvidenceManager.OnItemCollected(手表ClueItem) | UIManager.UpdateEvidenceDisplay
+r106: 13 | EvidenceManager | — | 手表ClueItem.evidenceId → 添加证据 → 当前证据=1/3 | —
+r107: 14 | EvidenceManager | EvidenceManager | EvidenceManager.CheckGoals() → 未达成 | —
+r108: 15 | PickupAction | UIManager | UIManager.ShowHint("已收容：失踪者手表", 2.0f) | —
+r109: 16 | PickupAction | UIManager | UIManager.HideInspector() | —
+r110: 17 | PickupAction | GameManager | GameManager.SwitchState(GameState.Exploration) | —
+r111: 18 | PickupAction | AudioManager | AudioManager.PlaySFX("item_pickup", volume) | —
+r113: 惩罚检查
+r115: 序号 | 触发源 | 调用的管理器 | 具体函数调用链 | 需要桥接
+r116: 1 | Timer | SanityManager | SanityManager.ProcessDelayedPenalty("花坛手表_未收容", 3.0f) | —
+r117: 2 | SanityManager | InventoryManager | InventoryManager.IsInContainment("手表_clue_id") → true | —
+r118: 3 | SanityManager | — | 惩罚跳过（物品已在收容箱中） | —
+r120: 总结
+r122: 步骤 | 触发者 | 调用的脚本/类 | 调用的方法 | 说明
+r123: 1 | 玩家拖拽温度计 | InteractionManager | ExecuteToolInteraction(温度计, 花坛) | InteractionManager 不再调用任何 Manager
+r124: 2 | InteractionManager | ToolItem | 温度计.Use() | 扣耐久，返回数值
+r125: 3 | InteractionManager | ToolBridge | toolBridge.OnToolUsed(温度计, 花坛) | 单一入口
+r126: 4 | ToolBridge | BranchManager | ResolveBranch("花坛", config) | 查询分支
+r127: 5 | ToolBridge | BranchManager | RegisterTemperature("花坛", 8.0f) | 注册数据
+r128: 6 | ToolBridge | UIManager | ShowToolResult("温度：8℃", true) | 直接调用
+r129: 7 | ToolBridge | FlagManager | Set("花坛_温度异常", true) | 直接调用
+r130: 8 | ToolBridge | AudioManager | PlayToolEffect(温度计, "8") | 直接调用
+r131: 9 | ToolBridge | — | 检查异常阈值 → 8℃→重度疑似 | 内部判断
+r132: 10 | 玩家拖拽探测器 | ToolBridge | OnToolUsed(探测器, 花坛) | 同上
+r133: 11 | ToolBridge | BranchManager | RegisterEMF("花坛", 4) | 注册数据
+r134: 12 | ToolBridge | BranchManager | ResolveBranch("花坛", config) | 再次查询→异常确定
+r135: 13 | ToolBridge | UIManager | PlayGlitchEffect(0.3f) | 直接调用
+r136: 14 | ToolBridge | AudioManager | PlaySFX("glass_break", pos) | 直接调用
+r137: 15 | ToolBridge | UIManager | ShowHint("异常信号！", 2.0f) | 直接调用
+r138: 16 | 玩家拾取手表 | PickupAction | Execute() | 动作层
+r139: 17 | PickupAction | PickupBridge | OnItemPickup(手表, 花坛) | 单一入口
+r140: 18 | PickupBridge | InventoryManager | AddToContainment(手表) | 直接调用
+r141: 19 | PickupBridge | UIManager | UpdateContainmentDisplay(1, 3) | 直接调用
+r142: 20 | PickupBridge | EvidenceManager | OnItemCollected(手表) | 直接调用
+r143: 21 | PickupBridge | EvidenceManager | CheckGoals() | 直接调用
+r144: 22 | PickupBridge | FlagManager | Set("picked_手表", true) | 直接调用
+r145: 23 | PickupBridge | AudioManager | PlaySFX("item_pickup") | 直接调用
+r146: 24 | PickupBridge | — | StartCoroutine(延迟惩罚检查) | 内部协程
+r147: 25 | 延迟3秒 | PickupBridge 协程 | IsInContainment(手表)? | 查询
+r148: 26 | PickupBridge | SanityManager | ReduceSan(2) → 跳过（已在收容箱） | 条件触发
