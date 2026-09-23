@@ -1,7 +1,9 @@
 using Project.Core.Runtime.Framework;
 using Project.Core.Runtime.Managers;
 using Project.Narrative.Scripts;
+using Project.UI.Editor;
 using Project.UI.Scripts;
+using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -46,7 +48,8 @@ namespace Project.Narrative.Editor
 
             CreateCamera();
             CreateEventSystem();
-            CreateUi();
+            // 中文字体资产不存在时先生成，避免 VN 文本缺字。
+            CreateUi(ApplyChineseFontToVnTexts.LoadOrCreateFontAsset());
 
             EditorSceneManager.SaveScene(scene, ScenePath);
             AssetDatabase.SaveAssets();
@@ -92,7 +95,7 @@ namespace Project.Narrative.Editor
             eventSystemObject.AddComponent<StandaloneInputModule>();
         }
 
-        private static void CreateUi()
+        private static void CreateUi(TMP_FontAsset cjkFont)
         {
             var canvasObject = new GameObject("Canvas");
             var canvas = canvasObject.AddComponent<Canvas>();
@@ -104,36 +107,21 @@ namespace Project.Narrative.Editor
             scaler.matchWidthOrHeight = 0.5f;
 
             var vnPanel = CreatePanel("VNPanel", canvasObject.transform, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(40f, 20f), new Vector2(-40f, 180f), new Color(0f, 0f, 0f, 0.72f));
-            var speakerText = CreateText("SpeakerText", vnPanel.transform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(16f, -12f), new Vector2(-16f, -46f), 24, TextAnchor.UpperLeft, "旁白");
-            var bodyText = CreateText("BodyText", vnPanel.transform, new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(16f, 70f), new Vector2(-16f, -54f), 22, TextAnchor.UpperLeft, string.Empty);
-            var continueText = CreateText("ContinueHint", vnPanel.transform, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-220f, 12f), new Vector2(-16f, 38f), 18, TextAnchor.MiddleRight, "空格 / 右键继续");
+            var speakerText = CreateText("SpeakerText", vnPanel.transform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(16f, -12f), new Vector2(-16f, -46f), 24f, TextAlignmentOptions.TopLeft, "旁白", cjkFont);
+            var bodyText = CreateText("BodyText", vnPanel.transform, new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(16f, 70f), new Vector2(-16f, -54f), 22f, TextAlignmentOptions.TopLeft, string.Empty, cjkFont);
 
+            // 选项容器：全屏区域（挂在 Canvas 上，不再是 VNPanel 的子物体），
+            // 这样选项可以居中竖排在画面中间；具体位置由 VnSceneUiView 的
+            // choiceAlign / choiceVertical / choiceMargin 在运行时决定。
             var choicesRoot = new GameObject("Choices");
-            choicesRoot.transform.SetParent(vnPanel.transform, false);
+            choicesRoot.transform.SetParent(canvasObject.transform, false);
             var choicesRect = choicesRoot.AddComponent<RectTransform>();
-            choicesRect.anchorMin = new Vector2(1f, 0f);
-            choicesRect.anchorMax = new Vector2(1f, 0f);
-            choicesRect.pivot = new Vector2(1f, 0f);
-            choicesRect.sizeDelta = new Vector2(404f, 140f);
-            choicesRect.anchoredPosition = new Vector2(-16f, 50f);
-
-            const int choiceCount = 4;
-            var choiceButtons = new Button[choiceCount];
-            var choiceTexts = new Text[choiceCount];
-            for (var i = 0; i < choiceCount; i++)
-            {
-                var buttonObject = CreateButton($"ChoiceButton{i + 1}", choicesRoot.transform, out var button, out var label);
-                var rect = buttonObject.GetComponent<RectTransform>();
-                rect.anchorMin = new Vector2(0f, 0f);
-                rect.anchorMax = new Vector2(1f, 0f);
-                rect.pivot = new Vector2(0.5f, 0f);
-                rect.offsetMin = new Vector2(0f, 84f - i * 28f);
-                rect.offsetMax = new Vector2(0f, 112f - i * 28f);
-                label.alignment = TextAnchor.MiddleCenter;
-                buttonObject.GetComponent<Image>().color = new Color(0.22f, 0.24f, 0.32f, 0.95f);
-                choiceButtons[i] = button;
-                choiceTexts[i] = label;
-            }
+            choicesRect.anchorMin = Vector2.zero;
+            choicesRect.anchorMax = Vector2.one;
+            choicesRect.offsetMin = Vector2.zero;
+            choicesRect.offsetMax = Vector2.zero;
+            choicesRect.pivot = new Vector2(0.5f, 0.5f);
+            choicesRect.anchoredPosition = Vector2.zero;
 
             var viewObject = new GameObject("VnSceneUiView");
             viewObject.transform.SetParent(canvasObject.transform, false);
@@ -142,9 +130,22 @@ namespace Project.Narrative.Editor
             vs.FindProperty("vnPanel").objectReferenceValue = vnPanel;
             vs.FindProperty("vnSpeakerText").objectReferenceValue = speakerText;
             vs.FindProperty("vnBodyText").objectReferenceValue = bodyText;
-            vs.FindProperty("vnContinueHintText").objectReferenceValue = continueText;
-            AssignObjectArray(vs.FindProperty("choiceButtons"), choiceButtons);
-            AssignObjectArray(vs.FindProperty("choiceButtonTexts"), choiceTexts);
+            vs.FindProperty("choiceRoot").objectReferenceValue = choicesRect;
+
+            // 选项按钮是生成式的：有预制体就用预制体，没有则运行时用代码生成同样式按钮。
+            var choiceButtonPrefab = AssetDatabase.LoadAssetAtPath<Button>(SetupVnChoiceButtons.PrefabPath);
+            if (choiceButtonPrefab != null)
+            {
+                vs.FindProperty("choiceButtonPrefab").objectReferenceValue = choiceButtonPrefab;
+            }
+
+            // 兜底按钮也用同一张 VN 底板图，保证两条生成路径外观一致。
+            var choicePlate = AssetDatabase.LoadAssetAtPath<Sprite>(SetupVnChoiceButtons.ChoicePlatePath);
+            if (choicePlate != null)
+            {
+                vs.FindProperty("choiceButtonSprite").objectReferenceValue = choicePlate;
+            }
+
             vs.ApplyModifiedPropertiesWithoutUndo();
         }
 
@@ -161,49 +162,28 @@ namespace Project.Narrative.Editor
             return panel;
         }
 
-        private static Text CreateText(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax, int fontSize, TextAnchor alignment, string initialText)
+        private static TextMeshProUGUI CreateText(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax, float fontSize, TextAlignmentOptions alignment, string initialText, TMP_FontAsset font)
         {
-            var textObject = new GameObject(name, typeof(RectTransform), typeof(Text));
+            var textObject = new GameObject(name, typeof(RectTransform), typeof(TextMeshProUGUI));
             textObject.transform.SetParent(parent, false);
             var rect = textObject.GetComponent<RectTransform>();
             rect.anchorMin = anchorMin;
             rect.anchorMax = anchorMax;
             rect.offsetMin = offsetMin;
             rect.offsetMax = offsetMax;
-            var text = textObject.GetComponent<Text>();
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            var text = textObject.GetComponent<TextMeshProUGUI>();
+            if (font != null)
+            {
+                text.font = font;
+            }
+
             text.fontSize = fontSize;
             text.alignment = alignment;
-            text.horizontalOverflow = HorizontalWrapMode.Wrap;
-            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.textWrappingMode = TextWrappingModes.Normal;
+            text.overflowMode = TextOverflowModes.Overflow;
             text.color = Color.white;
             text.text = initialText;
             return text;
-        }
-
-        private static GameObject CreateButton(string name, Transform parent, out Button button, out Text label)
-        {
-            var buttonObject = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
-            buttonObject.transform.SetParent(parent, false);
-            var rect = buttonObject.GetComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0f, 0f);
-            rect.anchorMax = new Vector2(0f, 0f);
-            rect.anchoredPosition = Vector2.zero;
-            rect.sizeDelta = new Vector2(404f, 24f);
-            var image = buttonObject.GetComponent<Image>();
-            image.color = new Color(0.18f, 0.2f, 0.28f, 0.92f);
-            button = buttonObject.GetComponent<Button>();
-            label = CreateText("Label", buttonObject.transform, Vector2.zero, Vector2.one, new Vector2(10f, 10f), new Vector2(-10f, -10f), 18, TextAnchor.MiddleCenter, string.Empty);
-            return buttonObject;
-        }
-
-        private static void AssignObjectArray(SerializedProperty property, Object[] objects)
-        {
-            property.arraySize = objects.Length;
-            for (var i = 0; i < objects.Length; i++)
-            {
-                property.GetArrayElementAtIndex(i).objectReferenceValue = objects[i];
-            }
         }
     }
 }

@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using Project.Core.Runtime.Framework;
 using Project.Core.Runtime.Managers;
@@ -21,7 +23,34 @@ namespace Project.Narrative.Scripts
         private bool isWaitingForExternalSignal;
         private bool isPlaying;
 
+        [Header("快进 / 自动播放")]
+        [Tooltip("快进的推进间隔（秒）。")]
+        [SerializeField] private float skipAdvanceInterval = 0.04f;
+        [Tooltip("自动播放时，一行显示完之后停留的秒数。")]
+        [SerializeField] private float autoAdvanceDelay = 1.6f;
+        [Tooltip("自动播放等待 UI 回报「这一行显示完了」的兜底上限（秒）。")]
+        [SerializeField] private float autoLineWaitTimeout = 6f;
+
+        private bool isSkipping;
+        private bool isAutoPlaying;
+        private bool isAutoDriverRunning;
+
+        /// <summary>快进 / 自动播放 / 播放状态发生变化时触发，UI 用它刷新按钮表现。</summary>
+        public event Action ModeChanged;
+
+        public bool IsSkipping => isSkipping;
+        public bool IsAutoPlaying => isAutoPlaying;
         public bool IsPlaying => isPlaying;
+
+        private bool isInputLocked;
+
+        /// <summary>过场演出期间锁住推进：点击推进、快进、自动播放都不生效。</summary>
+        public bool IsInputLocked => isInputLocked;
+
+        public void SetInputLocked(bool locked)
+        {
+            isInputLocked = locked;
+        }
         public string CurrentChapterId => currentChapter != null ? currentChapter.ChapterId : string.Empty;
         public string CurrentSequenceId => currentSequence != null ? currentSequence.sequenceId : string.Empty;
         public string CurrentNodeId => currentNode != null ? currentNode.nodeId : string.Empty;
@@ -42,6 +71,7 @@ namespace Project.Narrative.Scripts
             isLineFullyDisplayed = false;
             isPlaying = true;
             visitedNodeIds.Clear();
+            RaiseModeChanged();
 
             bridge.EnterVisualNovelState();
             bridge.ApplyFlags(chapter.SetFlagsOnStart, chapter.ClearFlagsOnStart);
@@ -141,34 +171,37 @@ namespace Project.Narrative.Scripts
 
             bridge.HideChoices();
             bridge.ApplyFlags(currentNode.setFlags, currentNode.clearFlags);
-            bridge.PresentNode(currentNode);
-            visitedNodeIds.Add(currentNode.nodeId);
+
+            // 先把本节点的状态摆好再表现：瞬显 UI 会在 PresentNode 里同步回调 NotifyLineDisplayed，
+            // 那时 isWaitingForChoice / isLineFullyDisplayed 必须已经是本节点的值。
             isWaitingForChoice = HasEligibleChoices(currentNode);
             isWaitingForExternalSignal = currentNode.waitForExternalSignal;
             isLineFullyDisplayed = false;
 
+            bridge.PresentNode(currentNode);
+            visitedNodeIds.Add(currentNode.nodeId);
+
             if (!suppressAutoContinue && currentNode.autoContinue && !isWaitingForChoice && !isWaitingForExternalSignal)
             {
-                await UniTask.Delay((int)(Mathf.Max(0f, currentNode.autoContinueDelay) * 1000f));
-                await Advance();
+                // 快进 / 自动播放由各自的循环统一步进，这里不再叠加一次自动推进，避免推进两次跳行。
+                if (!isSkipping && !isAutoPlaying)
+                {
+                    await UniTask.Delay((int)(Mathf.Max(0f, currentNode.autoContinueDelay) * 1000f));
+                    await Advance();
+                }
             }
         }
 
         public async UniTask Advance()
         {
-            if (!isPlaying || currentNode == null)
+            if (!isPlaying || currentNode == null || isInputLocked)
             {
                 return;
             }
 
             if (!isLineFullyDisplayed)
             {
-                isLineFullyDisplayed = true;
-                bridge.CompleteLine();
-                if (isWaitingForChoice)
-                {
-                    PresentChoices();
-                }
+                CompleteCurrentLine();
                 return;
             }
 
@@ -217,6 +250,209 @@ namespace Project.Narrative.Scripts
             await Advance();
         }
 
+        // ---- 快进 / 自动播放 ----
+
+        /// <summary>开关快进。与自动播放互斥（快进优先，打开快进会关掉自动）。</summary>
+        public void SetSkipMode(bool enabled)
+        {
+            if (isSkipping == enabled)
+            {
+                return;
+            }
+
+            isSkipping = enabled;
+            if (enabled)
+            {
+                isAutoPlaying = false;
+            }
+
+            Debug.Log(enabled ? "[VN] 快进：开" : "[VN] 快进：关");
+            RaiseModeChanged();
+            StartAutoDriver();
+        }
+
+        /// <summary>开关自动播放。与快进互斥。</summary>
+        public void SetAutoMode(bool enabled)
+        {
+            if (isAutoPlaying == enabled)
+            {
+                return;
+            }
+
+            isAutoPlaying = enabled;
+            if (enabled)
+            {
+                isSkipping = false;
+            }
+
+            Debug.Log(enabled ? "[VN] 自动播放：开" : "[VN] 自动播放：关");
+            RaiseModeChanged();
+            StartAutoDriver();
+        }
+
+        public void ToggleSkipMode()
+        {
+            SetSkipMode(!isSkipping);
+        }
+
+        public void ToggleAutoMode()
+        {
+            SetAutoMode(!isAutoPlaying);
+        }
+
+        /// <summary>
+        /// UI 层确认当前行已经完整显示：接打字机时在打字结束回调里调；
+        /// 瞬显 UI（当前实现）则在设置完文本后立刻调。
+        /// </summary>
+        public void NotifyLineDisplayed()
+        {
+            if (!isPlaying || currentNode == null || isLineFullyDisplayed)
+            {
+                return;
+            }
+
+            CompleteCurrentLine();
+        }
+
+        private void CompleteCurrentLine()
+        {
+            isLineFullyDisplayed = true;
+            bridge.CompleteLine();
+            if (isWaitingForChoice)
+            {
+                PresentChoices();
+            }
+        }
+
+        private void ResetPlaybackModes()
+        {
+            if (!isSkipping && !isAutoPlaying)
+            {
+                return;
+            }
+
+            isSkipping = false;
+            isAutoPlaying = false;
+            RaiseModeChanged();
+        }
+
+        private void RaiseModeChanged()
+        {
+            ModeChanged?.Invoke();
+        }
+
+        private void StartAutoDriver()
+        {
+            if (isAutoDriverRunning || (!isSkipping && !isAutoPlaying))
+            {
+                return;
+            }
+
+            RunAutoDriverAsync().Forget();
+        }
+
+        /// <summary>
+        /// 快进 / 自动播放唯一的步进循环：中途切换模式只改目标状态，不会产生互相打架的多条循环。
+        /// 遇到选项停下等玩家（快进会顺手把自己关掉），遇到 waitForExternalSignal 节点等玩法系统给信号。
+        /// </summary>
+        private async UniTaskVoid RunAutoDriverAsync()
+        {
+            isAutoDriverRunning = true;
+            var token = this.GetCancellationTokenOnDestroy();
+            try
+            {
+                while (isPlaying && (isSkipping || isAutoPlaying))
+                {
+                    if (IsPaused())
+                    {
+                        await UniTask.Yield(PlayerLoopTiming.Update, token);
+                        continue;
+                    }
+
+                    if (isWaitingForChoice)
+                    {
+                        if (isSkipping)
+                        {
+                            SetSkipMode(false);
+                            break;
+                        }
+
+                        await UniTask.Yield(PlayerLoopTiming.Update, token);
+                        continue;
+                    }
+
+                    if (isWaitingForExternalSignal)
+                    {
+                        await UniTask.Yield(PlayerLoopTiming.Update, token);
+                        continue;
+                    }
+
+                    if (isSkipping)
+                    {
+                        await Advance();
+                        if (isPlaying && isSkipping && !isWaitingForChoice && !isWaitingForExternalSignal)
+                        {
+                            await UniTask.Delay(TimeSpan.FromSeconds(Mathf.Max(0f, skipAdvanceInterval)), cancellationToken: token);
+                        }
+
+                        continue;
+                    }
+
+                    await WaitLineDisplayedAsync(token);
+                    if (!isPlaying || !isAutoPlaying || isWaitingForChoice || isWaitingForExternalSignal)
+                    {
+                        continue;
+                    }
+
+                    await UniTask.Delay(TimeSpan.FromSeconds(Mathf.Max(0f, autoAdvanceDelay)), cancellationToken: token);
+                    if (isPlaying && isAutoPlaying && !isWaitingForChoice && !isWaitingForExternalSignal)
+                    {
+                        await Advance();
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 对象销毁时取消，正常路径。
+            }
+            finally
+            {
+                isAutoDriverRunning = false;
+                if (!isPlaying)
+                {
+                    // 循环因为章节结束而退出时，把模式一起收干净，UI 才能灭掉高亮。
+                    ResetPlaybackModes();
+                }
+            }
+        }
+
+        /// <summary>等 UI 报告这一行显示完；UI 没报（例如还没接打字机）时有兜底上限，避免永久卡住。</summary>
+        private async UniTask WaitLineDisplayedAsync(CancellationToken token)
+        {
+            if (isLineFullyDisplayed)
+            {
+                return;
+            }
+
+            var elapsed = 0f;
+            var timeout = Mathf.Max(0.1f, autoLineWaitTimeout);
+            while (isPlaying && isAutoPlaying && !isLineFullyDisplayed && elapsed < timeout)
+            {
+                await UniTask.Yield(PlayerLoopTiming.Update, token);
+                elapsed += Time.unscaledDeltaTime;
+            }
+
+            if (isPlaying && !isLineFullyDisplayed)
+            {
+                CompleteCurrentLine();
+            }
+        }
+
+        private static bool IsPaused()
+        {
+            return Services.TryGet<GameManager>(out var gameManager) && gameManager.CurrentState == GameState.Pause;
+        }
+
         public VNSaveData GetSaveData()
         {
             return new VNSaveData
@@ -231,6 +467,7 @@ namespace Project.Narrative.Scripts
 
         public void LoadState(VNSaveData data)
         {
+            ResetPlaybackModes();
             visitedNodeIds.Clear();
             if (data?.visitedNodeIds != null)
             {
@@ -280,11 +517,11 @@ namespace Project.Narrative.Scripts
                 return;
             }
 
-            isLineFullyDisplayed = true;
-            bridge.CompleteLine();
-            if (isWaitingForChoice)
+            // 正常情况下 PresentNode 里已经通过 NotifyLineDisplayed 补全了这一行并展示了选项；
+            // 这里只是兜底，防止 UI 没有回报「显示完成」时读档卡在未完成状态。
+            if (!isLineFullyDisplayed)
             {
-                PresentChoices();
+                CompleteCurrentLine();
             }
         }
 
@@ -313,6 +550,7 @@ namespace Project.Narrative.Scripts
         private void ClearChapterState(bool runEndAction)
         {
             var endAction = runEndAction && currentChapter != null ? currentChapter.EndAction : null;
+            ResetPlaybackModes();
             isPlaying = false;
             isWaitingForChoice = false;
             isWaitingForExternalSignal = false;
