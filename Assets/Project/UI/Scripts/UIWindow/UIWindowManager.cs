@@ -111,18 +111,33 @@ public class UIWindowManager : MonoBehaviour
     public void Expand()
     {
         KillTweens();
-        Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
-        Vector2 localPoint;
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out localPoint);
+        // closedUI / closedSize 是"从哪长出来"的锚点与起始尺寸，都是可选的：
+        // 预制体里 closedUI 是空的 ✗ —— 不判空的话 Expand() 会在 TransformPoint 上抛 NullReference，
+        // 表现就是"点了 setting_icon 完全没反应"（连后面的淡入都跑不到）。
+        Vector2 localPoint = openedUI.anchoredPosition;
+        if (closedUI != null && canvasRect != null)
+        {
+            Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out localPoint);
+        }
 
         openedUI.gameObject.SetActive(true);
         openedUI.anchoredPosition = localPoint;
 
         Vector2 openedSize = openedUI.sizeDelta;
-        float scaleX = closedSize.x / openedSize.x;
-        float scaleY = closedSize.y / openedSize.y;
-        openedUI.localScale = new Vector3(scaleX, scaleY, 1f);
+        var scaleFrom = Vector3.one;
+        if (closedSize.x > 0.01f && closedSize.y > 0.01f && openedSize.x > 0.01f && openedSize.y > 0.01f)
+        {
+            scaleFrom = new Vector3(closedSize.x / openedSize.x, closedSize.y / openedSize.y, 1f);
+        }
+
+        openedUI.localScale = scaleFrom;
         openedUIGroup.alpha = 0f;
+
+        // 展开 = 可以点：收起时会把 blocksRaycasts 关掉（否则看不见的窗口会挡住下面的 UI），
+        // 不在这里恢复的话，窗口看着正常、里面的按钮却一个都点不动。
+        openedUIGroup.blocksRaycasts = true;
+        openedUIGroup.interactable = true;
 
         openedUI.DOAnchorPos(savedOpenedPos, animationDuration);
         openedUI.DOScale(Vector3.one, animationDuration);
@@ -135,16 +150,26 @@ public class UIWindowManager : MonoBehaviour
         savedOpenedPos = openedUI.anchoredPosition;
         savedOpenedScale = openedUI.localScale;
 
-        Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
-        Vector2 localPoint;
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out localPoint);
+        // 和 Expand 同理：closedUI 为空时不要碰它（否则收起也会抛 NullReference）。
+        if (closedUI != null && canvasRect != null)
+        {
+            Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out var localPoint);
 
-        Vector2 openedSize = openedUI.sizeDelta;
-        float scaleX = closedSize.x / openedSize.x;
-        float scaleY = closedSize.y / openedSize.y;
+            Vector2 openedSize = openedUI.sizeDelta;
+            var scaleTo = Vector3.one;
+            if (closedSize.x > 0.01f && closedSize.y > 0.01f && openedSize.x > 0.01f && openedSize.y > 0.01f)
+            {
+                scaleTo = new Vector3(closedSize.x / openedSize.x, closedSize.y / openedSize.y, 1f);
+            }
 
-        openedUI.DOAnchorPos(localPoint, animationDuration);
-        openedUI.DOScale(new Vector3(scaleX, scaleY, 1f), animationDuration);
+            openedUI.DOAnchorPos(localPoint, animationDuration);
+            openedUI.DOScale(scaleTo, animationDuration);
+        }
+        // 收起 = 不吃点击：不然这个已经看不见（甚至已 SetActive(false)）的窗口还会拦着玩法 UI。
+        openedUIGroup.blocksRaycasts = false;
+        openedUIGroup.interactable = false;
+
         openedUIGroup.DOFade(0f, animationDuration).OnComplete(() =>
         {
             openedUI.gameObject.SetActive(false);

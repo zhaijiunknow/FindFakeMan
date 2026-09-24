@@ -53,8 +53,18 @@ namespace Project.UI
         [Tooltip("切完房间后是否关掉 CRT 扫描线")]
         [SerializeField] private bool stopCrtAfterPull = true;
 
+        [Header("进入正式游戏（点完「开始潜入」之后）")]
+        [Tooltip("玩家做出「开始潜入」选择后会进入这个序列；到了这里就收对话框、等演出播完、再切场景。")]
+        [SerializeField] private string infiltrationSequenceId = "ending";
+        [Tooltip("切到哪个场景（正式玩法）。")]
+        [SerializeField] private string gameplaySceneName = "Px2050_Villa";
+        [Tooltip("可选：直接指定演出组件；留空则运行时按类型找（序幕场景里只有一个）。")]
+        [SerializeField] private TerminalBootTransition bootTransition;
+
         private bool crtOn;
         private bool pullStarted;
+        private bool chapterStarted;
+        private bool endingStarted;
 
         private VNDirector VN => vndirector != null ? vndirector : GameServices.Instance?.VN;
 
@@ -89,6 +99,72 @@ namespace Project.UI
             {
                 pullStarted = true;
                 RunPullBackAsync(destroyCancellationToken).Forget();
+            }
+
+            // 序章什么时候算"该进正式游戏了"：
+            //  - 玩家点完最后一个选项「开始潜入」后，VNDirector 会**直接 EndChapter**（不会再进 ending 序列），
+            //    所以主判据是"章节结束"（IsPlaying 由 true 变 false）；
+            //  - 同时保留按序列名判断的分支，万一以后改成有收尾序列也能用。
+            // 必须要求 chapterStarted：否则开场那一帧 IsPlaying 还是 false，会立刻误切场景。
+            if (!chapterStarted && vn.IsPlaying)
+            {
+                chapterStarted = true;
+            }
+
+            if (!endingStarted && chapterStarted
+                && (!vn.IsPlaying || vn.CurrentSequenceId == infiltrationSequenceId))
+            {
+                endingStarted = true;
+                Debug.Log($"[PrologueDirector] 序章结束（序列={vn.CurrentSequenceId}，IsPlaying={vn.IsPlaying}）：" +
+                          $"等演出播完 → 面板内过场切 {gameplaySceneName}");
+                RunEndingAsync(destroyCancellationToken).Forget();
+            }
+        }
+
+        /// <summary>
+        /// 玩家点完「开始潜入」之后的收尾：
+        ///  1. **立刻**收起 VN 对话框（接下来的画面交给演出）；
+        ///  2. 等演出播完（= mainUI 全屏）—— 玩家按得快也不会抢跑；
+        ///  3. 用**面板内过场**切到正式玩法场景（只在 mainUI 的 game 板块里收屏/开机，窗口其它部分不动）。
+        /// </summary>
+        private async UniTaskVoid RunEndingAsync(CancellationToken ct)
+        {
+            try
+            {
+                // 1. 收对话框（选项 + 面板一起收，玩家已经做完选择了）
+                if (Services.TryGet<UIManager>(out var uiManager))
+                {
+                    uiManager.HideVNChoices();
+                    uiManager.HideVNPanel();
+                }
+
+                // 2. 等演出播完：没播完就等，播完了立刻过。
+                var boot = bootTransition != null
+                    ? bootTransition
+                    : UnityEngine.Object.FindFirstObjectByType<TerminalBootTransition>();
+                if (boot != null)
+                {
+                    Debug.Log($"[PrologueDirector] 等演出（mainUI 全屏）：已完成={boot.IsFinished}");
+                    await boot.WaitForFinishedAsync(ct);
+                }
+                else
+                {
+                    Debug.LogWarning("[PrologueDirector] 场景里没有 TerminalBootTransition，跳过等待演出。");
+                }
+
+                // 3. 面板内过场切场景
+                if (Services.TryGet<SceneFlowManager>(out var sceneFlow))
+                {
+                    await sceneFlow.LoadSceneAsync(gameplaySceneName, SceneTransitionStyle.PanelLocal);
+                }
+                else
+                {
+                    Debug.LogWarning("[PrologueDirector] 没有 SceneFlowManager，无法切到正式玩法场景。");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 场景销毁取消，静默。
             }
         }
 

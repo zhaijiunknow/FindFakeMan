@@ -257,6 +257,7 @@ namespace Project.UI.Editor
                 if (child.name.StartsWith("Main", StringComparison.OrdinalIgnoreCase))
                 {
                     child.gameObject.SetActive(false);
+                    WireToolSlots(child as RectTransform);
                     return child as RectTransform;
                 }
             }
@@ -271,8 +272,74 @@ namespace Project.UI.Editor
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, canvasRect);
             instance.name = "MainUI";
             instance.SetActive(false);
+            WireToolSlots((RectTransform)instance.transform);
             Debug.Log($"[Boot] 场景里没有终端实例，已实例化 {MainPrefabPath} 并命名 MainUI。");
             return (RectTransform)instance.transform;
+        }
+
+        /// <summary>
+        /// 给序幕的 MainUI 接上工具槽图标：窗口在"自检"那一拍露出来时，底部 4 个槽位就已经有道具图标，
+        /// 之后全屏也还在（图标本来就在窗口里，跟着一起放大）。
+        ///
+        /// 装备直接填资产：序幕场景里没有 InventoryManager，也不该为了显示 4 个图标把整套 manager 搬过来。
+        /// 组件会在自己 OnEnable（窗口第一次被打开）时填，所以不需要过场回调。
+        /// </summary>
+        private static void WireToolSlots(RectTransform mainUi)
+        {
+            if (mainUi == null)
+            {
+                return;
+            }
+
+            var view = mainUi.GetComponent<Project.UI.BigApp.ToolSlotIconsView>();
+            if (view == null)
+            {
+                view = mainUi.gameObject.AddComponent<Project.UI.BigApp.ToolSlotIconsView>();
+            }
+
+            var icons = new UnityEngine.UI.Image[4];
+            for (var i = 0; i < icons.Length; i++)
+            {
+                icons[i] = mainUi.Find($"BigApp/item/boxcontent/itemButton{i + 1}/item")?.GetComponent<UnityEngine.UI.Image>();
+            }
+
+            // 和关卡里"装备的 4 件"保持一致（工具包是第 5 件，装备位只有 4 格，所以不在这里）。
+            var tools = new Project.Gameplay.Scripts.Items.ToolItem[4];
+            string[] assetNames = { "Tool_Recorder", "Tool_UVLight", "Tool_Detector", "Tool_Thermometer" };
+            for (var i = 0; i < tools.Length; i++)
+            {
+                tools[i] = AssetDatabase.LoadAssetAtPath<Project.Gameplay.Scripts.Items.ToolItem>(
+                    $"Assets/Project/Gameplay/ScriptableObjects/Tools/{assetNames[i]}.asset");
+            }
+
+            var so = new SerializedObject(view);
+            var iconsProp = so.FindProperty("slotIcons");
+            iconsProp.arraySize = icons.Length;
+            for (var i = 0; i < icons.Length; i++)
+            {
+                iconsProp.GetArrayElementAtIndex(i).objectReferenceValue = icons[i];
+            }
+
+            var toolsProp = so.FindProperty("tools");
+            toolsProp.arraySize = tools.Length;
+            for (var i = 0; i < tools.Length; i++)
+            {
+                toolsProp.GetArrayElementAtIndex(i).objectReferenceValue = tools[i];
+            }
+
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            var found = 0;
+            foreach (var tool in tools)
+            {
+                if (tool != null)
+                {
+                    found++;
+                }
+            }
+
+            Debug.Log($"[Boot] MainUI 已接工具槽：槽位图标 {(icons[0] != null)}，工具资产 {found}/4"
+                      + "（自检那一拍就会出现，全屏后仍在）。");
         }
 
         private static void OrderCanvas(RectTransform canvasRect, RectTransform roomRoot, RectTransform mainUi, RectTransform transitionRoot)

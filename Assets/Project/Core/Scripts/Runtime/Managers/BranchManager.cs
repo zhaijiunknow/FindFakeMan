@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using Project.Core.Runtime.Framework;
+using Project.Gameplay.Scripts.Case;
 
 namespace Project.Core.Runtime.Managers
 {
@@ -14,7 +15,11 @@ namespace Project.Core.Runtime.Managers
         {
             baseSeed = seed;
             observations.Clear();
-            Random.InitState(seed);
+
+            // 原来这里是 Random.InitState(seed)：播的是 Unity 的**全局**随机，
+            // 而全项目没有任何地方用 Random.Range/value（播了没人用 ✗）。
+            // 现在统一走项目自己的随机系统：开一局 = 重置所有随机桶（同组共用一个流，组间独立）。
+            CaseRandomBuckets.BeginSession(seed);
         }
 
         public void RegisterTemperature(string interactableId, float value) => GetOrCreate(interactableId).temperature = value;

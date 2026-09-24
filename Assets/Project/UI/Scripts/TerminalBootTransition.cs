@@ -118,6 +118,53 @@ namespace Project.UI
             Play();
         }
 
+        private UniTaskCompletionSource finishedSource;
+
+        /// <summary>演出是否已播完（= mainUI 已经全屏）。</summary>
+        public bool IsFinished { get; private set; }
+
+        /// <summary>
+        /// 等这场演出播完。点完「开始潜入」之后要等它，才允许切场景 ——
+        /// 否则玩家按得快时，剧情会抢在 mainUI 全屏之前推进到结尾。
+        /// </summary>
+        public UniTask WaitForFinishedAsync()
+        {
+            if (IsFinished)
+            {
+                return UniTask.CompletedTask;
+            }
+
+            finishedSource ??= new UniTaskCompletionSource();
+            return finishedSource.Task;
+        }
+
+        public async UniTask WaitForFinishedAsync(CancellationToken ct)
+        {
+            if (IsFinished)
+            {
+                return;
+            }
+
+            finishedSource ??= new UniTaskCompletionSource();
+
+            // 调用方传 destroyCancellationToken：场景销毁时这个等待会被取消，不会留下挂死的 await。
+            await finishedSource.Task.AttachExternalCancellation(ct);
+        }
+
+        /// <summary>标记演出完成：写 flag（"mainUI 已全屏"的唯一事实来源）并放行等待者。</summary>
+        private void MarkFinished()
+        {
+            if (IsFinished)
+            {
+                return;
+            }
+
+            IsFinished = true;
+            GameServices.Instance?.Flags.Set("mainui_fullscreen");
+            finishedSource?.TrySetResult();
+            Debug.Log("[TerminalBoot] 演出完成：mainUI 已全屏（flag mainui_fullscreen）");
+        }
+
         /// <summary>播放整段过场（外部也可以主动调）。</summary>
         public void Play()
         {
@@ -140,6 +187,9 @@ namespace Project.UI
             }
 
             SetBlinkBars(0f);
+
+            // 跳过演出也是"已经全屏"，同样放行等待者。
+            MarkFinished();
         }
 
         private async UniTaskVoid PlayAsync(CancellationToken ct)
@@ -153,6 +203,9 @@ namespace Project.UI
                 await BootAsync(ct);
                 await OpenTerminalAsync(ct);
                 await BlinkAsync(ct);
+
+                // 只有真的播完才算"全屏就绪"；被取消（场景销毁）不算。
+                MarkFinished();
             }
             catch (OperationCanceledException)
             {

@@ -21,7 +21,7 @@ namespace Project.UI.MainMenu
             public int Height { get; }
         }
 
-        [SerializeField] private string gameplaySceneName = "Stage2_Breach_Sample";
+        [SerializeField] private string gameplaySceneName = "Px2050_Villa";
         [SerializeField] private Button continueButton;
         [SerializeField] private GameObject rootPanel;
         [SerializeField] private GameObject rootButtonContainer;
