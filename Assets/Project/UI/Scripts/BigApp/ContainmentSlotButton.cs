@@ -1,5 +1,6 @@
 using Project.Core.Runtime.Framework;
 using Project.Core.Runtime.Managers;
+using Project.Gameplay.Scripts.Items;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -33,14 +34,25 @@ namespace Project.UI.BigApp
 
         private void OnClicked()
         {
-            if (!Services.TryGet<InventoryManager>(out var inventory))
+            var item = default(Item);
+            if (Services.TryGet<InventoryManager>(out var inventory))
             {
-                detail?.ShowItem(null);
+                var items = inventory.GetContainmentItems();
+                item = slotIndex >= 0 && slotIndex < items.Count ? items[slotIndex] : null;
+            }
+
+            // **必须走 HUD 正门** ✓，不能只喂详情区 ✗：
+            // 方向体感读的是 InvestigationHudView.CurrentItem ✓（InspectorDragHandler ✓），
+            // 而 detail.ShowItem 只是把文字填进面板 ✓、**不会**设 CurrentItem ✗ ——
+            // 结果就是"点开收容格 → 下拖丢弃"永远没反应（体感眼里的 item 是 null ✗）。
+            var hud = GetComponentInParent<InvestigationHudView>(true);
+            if (hud != null)
+            {
+                hud.ShowInspector(item, null);
                 return;
             }
 
-            var items = inventory.GetContainmentItems();
-            var item = slotIndex >= 0 && slotIndex < items.Count ? items[slotIndex] : null;
+            // 没有 HUD（比如单独跑某个 UI 测试场景 ✓）就退回老行为 ✓。
             detail?.ShowItem(item);
         }
     }

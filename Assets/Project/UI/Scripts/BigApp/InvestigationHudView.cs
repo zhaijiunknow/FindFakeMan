@@ -26,7 +26,7 @@ namespace Project.UI.BigApp
         [Header("预制体节点：右侧 / 详情区")]
         [Tooltip("box/life：Health 是个 Slider，value = SAN 比例。")]
         [SerializeField] private Slider sanitySlider;
-        [Tooltip("box/Collect 标题：把它写成「Collect 1/3」这种读数。")]
+        [Tooltip("box/Collect 标题：把它写成「Collect」这种读数。")]
         [SerializeField] private TextMeshProUGUI containmentLabel;
         [Tooltip("nothink 上的详情区：检视信息、点槽位都往这里显示。")]
         [SerializeField] private ItemDetailPanel detailPanel;
@@ -48,14 +48,15 @@ namespace Project.UI.BigApp
 
         [Header("拖拽影子（预制体里没有，构建工具加在窗口根节点上）")]
         [SerializeField] private Image toolDragGhost;
-        [Tooltip("雷达（探测器）的动态效果：拖工具时加速扫描，判定有效时闪一下。")]
+        [Tooltip("雷达（探测器）的动态效果：拖工具时加速扫描。")]
         [SerializeField] private RadarEffects radar;
         [SerializeField] private float defaultHintDuration = 2f;
         [SerializeField] private float resultHoldDuration = 3f;
         [SerializeField] private Color resultNormalColor = new Color(0.85f, 1f, 0.9f, 1f);
         [SerializeField] private Color resultWarnColor = new Color(1f, 0.55f, 0.5f, 1f);
-        [SerializeField] private Color dragValidColor = new Color(0.55f, 1f, 0.7f, 0.95f);
-        [SerializeField] private Color dragInvalidColor = new Color(1f, 0.45f, 0.45f, 0.95f);
+
+        // 拖拽影子恒用中性色 ✓ —— 原来还有 dragValidColor / dragInvalidColor 两个"对不对"的颜色 ✗，
+        // 那等于边拖边告诉玩家该用哪把工具 ✓，已删 ✗（见 SetToolDragValidity 的注释 ✓）。
         [SerializeField] private Color dragNeutralColor = new Color(1f, 1f, 1f, 0.95f);
 
         [Header("VN（玩法场景里播剧情时用，可留空）")]
@@ -88,6 +89,9 @@ namespace Project.UI.BigApp
 
         /// <summary>当前正在检视的交互点（方向拖拽要用；没有就是 null）。</summary>
         public SimpleInteractable CurrentInteractable { get; private set; }
+
+        /// <summary>正在亮"常驻描边"的那件家具 ✓（切选中时要先把上一件的描边关掉 ✓）。</summary>
+        private SimpleInteractable outlinedInteractable;
 
         /// <summary>方向拖拽的提示文字（例如「↑拾取 ↓丢弃 ←装备 →检视」），由 InspectorDragHandler 推过来。</summary>
         public void SetDirectionHints(string hints)
@@ -129,6 +133,16 @@ namespace Project.UI.BigApp
             CurrentItem = item;
             CurrentInteractable = interactable;
 
+            // 选中家具 = **同时清掉"道具/收容物"那边的选中** ✓：
+            // 否则收容格/工具槽的 Selected 皮肤会一直亮着 ✓，看起来像"两样东西同时被选中"✗。
+            if (interactable != null && UnityEngine.EventSystems.EventSystem.current != null)
+            {
+                UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);
+            }
+
+            // 选中谁，谁就常驻描边 ✓（不再只是悬停才亮 ✓）。
+            ApplySelectionOutline(interactable);
+
             if (interactable != null)
             {
                 interactable.SetInspected(true);
@@ -136,45 +150,75 @@ namespace Project.UI.BigApp
 
             var displayName = item != null
                 ? item.DisplayName
-                : interactable != null ? interactable.InteractableId : string.Empty;
+                : interactable != null ? CleanInteractableName(interactable.InteractableId) : string.Empty;
             var description = interactable != null && !string.IsNullOrWhiteSpace(interactable.Description)
                 ? interactable.Description
                 : item != null ? item.Description : string.Empty;
 
+            // **只用 Desc 一个字段** ✓ —— Name / Status 两个对象直接关掉 ✓（不再各占一行 ✗）。
+            // 内容按状态切换 ✓：
+            //   点一下（还没检视）→ 只给**名称** ✓（干净 ✓；想看细节就自己右拖检视 ✓）
+            //   检视过 ✓          → 给**描述**（异常线索再补一句异常描述 ✓）
+            // 方向提示永远在最后一行 ✓（它是"现在能做什么"✓，不该被正文挤掉 ✓）。
             if (detailNameText != null)
             {
-                // 名称那一行顺带显示方向拖拽提示（由 InspectorDragHandler 推过来）。
-                var title = string.IsNullOrWhiteSpace(displayName) ? string.Empty : displayName;
-                if (!string.IsNullOrWhiteSpace(directionHints))
-                {
-                    title = string.IsNullOrWhiteSpace(title) ? directionHints : $"{title}   {directionHints}";
-                }
-
-                if (!string.IsNullOrWhiteSpace(title))
-                {
-                    detailNameText.text = title;
-                }
+                detailNameText.gameObject.SetActive(false);
             }
 
-            if (detailDescText != null)
+            if (detailStatusText != null)
             {
-                detailDescText.text = description ?? string.Empty;
+                detailStatusText.gameObject.SetActive(false);
             }
 
-            if (detailStatusText != null && interactable != null)
+            var inspected = interactable != null && interactable.IsZoomed;
+            var content = inspected ? description : displayName;
+
+            if (inspected && item is ClueItem clueItem && clueItem.IsAnomaly
+                && interactable != null && !string.IsNullOrWhiteSpace(interactable.AnomalyDescription))
             {
-                // 异常线索优先显示异常描述；其它情况保留详情区自己写的状态（工具耐久 / 【线索】）。
-                var isAnomaly = item is ClueItem clueItem && clueItem.IsAnomaly;
-                if (isAnomaly && !string.IsNullOrWhiteSpace(interactable.AnomalyDescription))
-                {
-                    detailStatusText.text = interactable.AnomalyDescription;
-                }
+                content = string.IsNullOrWhiteSpace(content)
+                    ? interactable.AnomalyDescription
+                    : $"{content}\n{interactable.AnomalyDescription}";
             }
+
+            SetPanelText(content);
 
             if (logCalls)
             {
-                Debug.Log($"[HUD] ShowInspector: {displayName}");
+                Debug.Log($"[HUD] ShowInspector: {displayName}（{(inspected ? "详情" : "名称")}）");
             }
+        }
+
+        /// <summary>
+        /// 把内容写进**唯一**的 Desc ✓，方向提示跟在最后一行 ✓。
+        /// 这是详情区唯一的写入口 ✓ —— Name / Status 在第一次选中时就被关掉了 ✓，
+        /// 面板上只留一块文字区 ✓（"点一下看名字 / 检视看详情 / 用完道具看结果"都走这里 ✓）。
+        /// </summary>
+        private void SetPanelText(string content)
+        {
+            if (detailDescText == null)
+            {
+                return;
+            }
+
+            var text = content ?? string.Empty;
+
+            // **不再往这里塞方向提示** ✗→✓：那些箭头现在由**雷达表盘中心**报名字 ✓
+            //（扫到哪个可用方向就显示"拾取 / 丢弃 / 装备 / 检视"✓），详情区留干净给"名称 / 详情 / 结果"✓。
+            detailDescText.text = text;
+        }
+
+        /// <summary>
+        /// 交互物的 id（`obj_3b木桌` ✓）→ 给玩家看的名字（`木桌` ✓）。
+        /// 前缀是建造工具按美术文件名生成的 ✓（`3b` = 夜版 ✓），对玩家毫无意义 ✗。
+        /// </summary>
+        private static string CleanInteractableName(string interactableId)
+        {
+            return string.IsNullOrEmpty(interactableId)
+                ? string.Empty
+                : interactableId.Replace("obj_3b", string.Empty)
+                    .Replace("obj_3a", string.Empty)
+                    .Replace("obj_", string.Empty);
         }
 
         public void HideInspector()
@@ -190,8 +234,11 @@ namespace Project.UI.BigApp
 
             detailPanel?.Clear();
             detailVisible = false;
-            CurrentItem = null;
-            CurrentInteractable = null;
+
+            // **不清 `CurrentItem` / `CurrentInteractable`** ✗→✓ ——
+            // 面板收起来 ≠ 取消选中 ✓：玩家对着家具用完道具之后 ✓，选中的**还是那件家具** ✓，
+            // 描边继续亮着 ✓、方向体感（上拖拾取等）也继续有效 ✓。
+            // 换目标/取消选中只有一条路：去点别的东西 ✓（那时 `ShowInspector` 会把描边切过去 ✓）。
 
             // 详情收起来之后，把证据读数放回 Name 那行。
             ApplyEvidenceToName();
@@ -203,6 +250,56 @@ namespace Project.UI.BigApp
             if (Services.TryGet<GameManager>(out var gameManager) && gameManager.CurrentState == GameState.Inspection)
             {
                 gameManager.RevertState();
+            }
+        }
+
+        /// <summary>
+        /// **取消选中** ✓（右键 / 点空白处 ✓）：收起详情区 ✓ + 熄灭常驻描边 ✓ + 清掉当前目标 ✓。
+        /// 清掉目标之后 ✓，方向表盘和四个箭头会自动收起来 ✓（`InspectorDragHandler` 每帧比对选中是否变了 ✓）。
+        /// </summary>
+        public void ClearSelection()
+        {
+            HideInspector();
+
+            CurrentItem = null;
+            CurrentInteractable = null;
+            ApplySelectionOutline(null);
+
+            // 让表盘/箭头立刻跟着收 ✓（不然要等下一帧 ✓）。
+            ApplyEvidenceToName();
+        }
+
+        /// <summary>
+        /// **选中谁，谁就常驻描边** ✓：把上一件的描边关掉 ✓、给新选中的那件点亮 ✓。
+        ///
+        /// 组件是 <see cref="SpriteOutline"/> ✓（挂在整帧家具图层上 ✓）；没挂就静默跳过 ✓ ——
+        /// 它本来就是个可选装饰 ✓，缺了不该影响玩法 ✓。
+        /// </summary>
+        private void ApplySelectionOutline(SimpleInteractable interactable)
+        {
+            if (ReferenceEquals(interactable, outlinedInteractable))
+            {
+                return;
+            }
+
+            if (outlinedInteractable != null)
+            {
+                var previous = outlinedInteractable.GetComponent<SpriteOutline>();
+                if (previous != null)
+                {
+                    previous.SetSelected(false);
+                }
+            }
+
+            outlinedInteractable = interactable;
+
+            if (outlinedInteractable != null)
+            {
+                var current = outlinedInteractable.GetComponent<SpriteOutline>();
+                if (current != null)
+                {
+                    current.SetSelected(true);
+                }
             }
         }
 
@@ -238,11 +335,6 @@ namespace Project.UI.BigApp
 
         public void SetContainment(int current, int max)
         {
-            if (containmentLabel != null)
-            {
-                containmentLabel.text = max > 0 ? $"Collect {current}/{max}" : "Collect";
-            }
-
             // 槽位里的小图标：已收容的格子打开并显示线索图标（图标从 InventoryManager 现取）。
             IReadOnlyList<Item> contained = null;
             if (Services.TryGet<InventoryManager>(out var inventoryManager))
@@ -344,46 +436,63 @@ namespace Project.UI.BigApp
 
         public void SetToolDragValidity(bool isValid)
         {
-            // 工具对上目标了：让雷达闪一下（本关少有的正反馈）。
-            if (isValid)
-            {
-                radar?.Ping();
-            }
-
-            if (toolDragGhost != null && toolDragGhost.gameObject.activeSelf)
-            {
-                toolDragGhost.color = isValid ? dragValidColor : dragInvalidColor;
-            }
+            // **已停用 ✗→✓**：原来"工具对口"会让影子变绿、还让雷达 Ping 一下 ✗ ——
+            // 那等于提前把答案递给玩家 ✓，把"自己试、自己判断"的难度整个抹掉了 ✗。
+            // 对标恐鬼症：不给这种提示 ✓（拖拽影子恒为 dragNeutralColor ✓，由 ShowToolDrag 设 ✓）。
+            //
+            // 接口保留 ✓：UIManager / ISceneUiView 那条链还在 ✓（以后想换成别的、不剧透的反馈也用得上 ✓）。
         }
 
         // ---- 提示 / 结果 ----
 
         public void SetHint(string content, float duration)
         {
-            if (detailStatusText == null)
+            if (detailDescText == null)
             {
                 return;
             }
 
-            // 提示占用 Status 那一行；开始占用时把原文备份，计时结束后还原。
-            if (!statusBusy)
-            {
-                statusBackup = detailStatusText.text;
-                statusBusy = true;
-            }
-
-            detailStatusText.text = content ?? string.Empty;
-            hintVersion++;
-            var version = hintVersion;
-
+            // **提示也走唯一那块文字区（Desc）** ✓ —— Status 那行已经关掉了 ✗，
+            // 继续写它就等于石沉大海 ✓：像「先点开看清这里，再用工具。」这种**关键提示**会直接消失 ✗✗，
+            // 玩家的感受就是"家具用不了、又没有任何解释"✗（这个坑真踩到了 ✓）。
             if (string.IsNullOrEmpty(content))
             {
                 statusBusy = false;
-                detailStatusText.text = statusBackup ?? string.Empty;
+                RerenderSelection();
                 return;
             }
 
+            // 正在显示**工具结果**时不抢 ✗ —— 刚读到的读数比提示重要 ✓（结果自己会在几秒后还原 ✓）。
+            if (descBusy)
+            {
+                return;
+            }
+
+            statusBusy = true;
+            hintVersion++;
+            var version = hintVersion;
+
+            SetPanelText(content);
             ClearHintAfterAsync(version, duration > 0f ? duration : defaultHintDuration).Forget();
+        }
+
+        /// <summary>
+        /// 按当前选中的目标把详情区**重渲染**一遍 ✓（提示到点时用它还原 ✓）。
+        /// 比"备份一段字符串再写回去"稳 ✓：内容只由 `ShowInspector` 一处决定 ✓，不会出现还原错位 ✗。
+        /// </summary>
+        private void RerenderSelection()
+        {
+            if (CurrentInteractable == null && CurrentItem == null)
+            {
+                if (detailDescText != null)
+                {
+                    detailDescText.text = string.Empty;
+                }
+
+                return;
+            }
+
+            ShowInspector(CurrentItem, CurrentInteractable);
         }
 
         public void SetResult(string content, bool highlight)
@@ -428,14 +537,15 @@ namespace Project.UI.BigApp
                 return;
             }
 
-            if (version != hintVersion || detailStatusText == null)
+            if (version != hintVersion || detailDescText == null)
             {
                 return;
             }
 
-            // 还原被提示占用的那一行（详情区自己写的状态，或空）。
+            // 到点还原：**重新渲染当前选中的内容** ✓ ——
+            // 不能再把 `statusBackup` 写回 Status 那行了 ✗（那行已经关掉 ✓，写了也没人看得见 ✓）。
             statusBusy = false;
-            detailStatusText.text = statusBackup ?? string.Empty;
+            RerenderSelection();
         }
 
         private async UniTaskVoid ClearResultAfterAsync(int version, float delay)

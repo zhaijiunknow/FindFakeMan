@@ -142,8 +142,9 @@ namespace Project.UI.Scripts
                 return;
             }
 
-            // 空格 / 右键推进（与选项按钮冲突最小）
-            if ((Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.Space))
+            // **左键 / 右键 / 空格都能推进** ✓（原来只有右键+空格 ✗，玩家第一反应是左键 ✓，会以为卡住了 ✗）。
+            // 上面那道闸保证了有选项时不会误推进 ✓ —— 点选项按钮走的是按钮自己 ✓，这里已经在第 140 行返回了 ✓。
+            if ((Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.Space))
                 && Services.TryGet<VNDirector>(out var vnDirector))
             {
                 vnDirector.Advance().Forget();
@@ -291,6 +292,7 @@ namespace Project.UI.Scripts
 
         public void ShowInspector(Item item, SimpleInteractable interactable) { }
         public void HideInspector() { }
+        public void ClearSelection() { }
         public void ShowToolDrag(Sprite sprite, Vector2 position) { }
         public void UpdateToolDrag(Vector2 position) { }
         public void HideToolDrag() { }

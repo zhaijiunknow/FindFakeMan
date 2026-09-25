@@ -101,6 +101,8 @@ namespace Project.Samples.Stage2Breach.Scripts
             hudView?.ShowInspector(item, interactable);
         }
 
+        public void ClearSelection() { }
+
         public void HideInspector()
         {
             hudView?.HideInspector();

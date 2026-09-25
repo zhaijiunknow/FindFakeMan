@@ -66,7 +66,6 @@ namespace Project.Core.Runtime.Managers
 
         public void UpdateToolDragIndicator(Vector2 position)
         {
-            Debug.Log($"UpdateToolDragIndicator: {position}");
             SceneUi?.UpdateToolDrag(position);
         }
 
@@ -112,6 +111,15 @@ namespace Project.Core.Runtime.Managers
         public void PlaySanDamageEffect(int amount) => Debug.Log($"PlaySanDamageEffect: {amount}");
         public void PlayGlitchEffect(float duration) => Debug.Log($"PlayGlitchEffect: {duration}");
         public void PlayScreenShake(float intensity, float duration) => Debug.Log($"PlayScreenShake: {intensity}, {duration}");
+
+        /// <summary>
+        /// **CG 占位** ✓：便携式探测器读到 **EMF 5 级**时要播一段 CG ✓
+        ///（见 `Docs/ContainmentRules.md` §2.1 与 §3.3 沙发那条 ✓）。
+        ///
+        /// 现在只打日志 ✓（和上面那几个同款空壳 ✓）—— 等美术的 CG 到位 ✓，
+        /// 在这里换成真正的播放（或转给一个 CgPlayer ✓）就接上了 ✓，调用点不用再改 ✓。
+        /// </summary>
+        public void PlayCg(string cgId) => Debug.Log($"PlayCg: {cgId}");
 
         public void ShowHint(string content, float duration)
         {

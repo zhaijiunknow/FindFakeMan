@@ -32,6 +32,27 @@ namespace Project.UI.BigApp
         [SerializeField] private float pingDuration = 0.45f;
 
         private float angle;
+        private bool angleAdopted;
+
+        /// <summary>
+        /// 接上序幕扫到的角度：面板内 CRT 收屏 → 展开的那一下，雷达看起来是同一次旋转没断过 ✓。
+        /// 放在 OnEnable（而不是 Update 里做一次）：否则第一帧会先按 0° 画一次，看起来是"跳"了一下 ✗。
+        /// </summary>
+        private void OnEnable()
+        {
+            if (angleAdopted)
+            {
+                return;
+            }
+
+            angleAdopted = true;
+            var handed = Project.Gameplay.Scripts.Case.CaseHandoff.RadarSweepAngle;
+            if (handed >= 0f)
+            {
+                angle = handed;
+                Debug.Log($"[Radar] 接过序幕的扫描角度：{angle:0.#}°");
+            }
+        }
         private bool scanning;
         private float pingTimer;
 
@@ -61,9 +82,11 @@ namespace Project.UI.BigApp
             var speed = sweepSpeed * (scanning ? scanningMultiplier : 1f);
             if (alwaysSweep && sweep != null)
             {
-                // localEulerAngles.z 取负 = 顺时针。
+                // 扇形贴图的前缘（最亮那条边）在贴图的上方偏"逆时针"一侧 ✗，
+                // 所以必须**正角**旋转（localEulerAngles.z 取正 = 逆时针）才能让亮边在前；
+                // 取负的话是模糊的尾边在往前跑 ✗（之前就是这个问题）。
                 angle = Mathf.Repeat(angle + speed * Time.unscaledDeltaTime, 360f);
-                sweep.rectTransform.localEulerAngles = new Vector3(0f, 0f, -angle);
+                sweep.rectTransform.localEulerAngles = new Vector3(0f, 0f, angle);
             }
 
             if (sweep == null)

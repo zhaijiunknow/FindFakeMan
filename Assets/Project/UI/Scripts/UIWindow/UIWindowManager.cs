@@ -18,6 +18,12 @@ public class UIWindowManager : MonoBehaviour
     [Tooltip("运行开始时窗口的初始状态：默认隐藏（false）；勾选后初始直接显示（true）")]
     [SerializeField] private bool startVisible = false;
 
+    [Header("按钮接线")]
+    [Tooltip("是否自动接标题栏的 red / green / blue（关闭 / 铺满 / 还原）。\n"
+             + "小软件那个窗口要**关掉** ✓ —— 它的三个键由 SmallAppPageHost 接\n"
+             + "（口径：红=关闭、蓝=最小化、绿=全屏 ✓），不然两边都接会打架 ✗。")]
+    [SerializeField] private bool bindWindowButtons = true;
+
     private Vector2 savedOpenedPos;
     private Vector3 savedOpenedScale;
     private Vector2 closedSize;
@@ -55,9 +61,17 @@ public class UIWindowManager : MonoBehaviour
         }
 
         // 通用窗口三键：red=关闭，green=最大化(铺满)，blue=窗口化(还原)。任意窗口标题栏带这些键即生效。
-        BindButton("red", OnCloseWindow);
-        BindButton("green", OnMaximize);
-        BindButton("blue", OnRestore);
+        //
+        // ⚠️ 可以整块关掉 ✓（bindWindowButtons = false）：小软件（SmallApp）就是这样 ✓ ——
+        // 它的三个键由 SmallAppPageHost 接 ✗→✓，否则**两边都接** ✓：
+        //   green 同时"铺满矩形 + 切系统全屏"✗、blue 同时"还原矩形 + 收起窗口"✗ —— 语义直接打架 ✓。
+        // 口径（小软件）：红=关闭 ✓、蓝=最小化（保留当前页 ✓）、绿=全屏 ✓。
+        if (bindWindowButtons)
+        {
+            BindButton("red", OnCloseWindow);
+            BindButton("green", OnMaximize);
+            BindButton("blue", OnRestore);
+        }
     }
 
     private void BindButton(string childName, UnityAction action)
@@ -111,33 +125,25 @@ public class UIWindowManager : MonoBehaviour
     public void Expand()
     {
         KillTweens();
-        // closedUI / closedSize 是"从哪长出来"的锚点与起始尺寸，都是可选的：
-        // 预制体里 closedUI 是空的 ✗ —— 不判空的话 Expand() 会在 TransformPoint 上抛 NullReference，
-        // 表现就是"点了 setting_icon 完全没反应"（连后面的淡入都跑不到）。
-        Vector2 localPoint = openedUI.anchoredPosition;
-        if (closedUI != null && canvasRect != null)
-        {
-            Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out localPoint);
-        }
+        Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
+        Vector2 localPoint;
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out localPoint);
 
         openedUI.gameObject.SetActive(true);
+
+        // **必须把射线放回来** ✗→✓：收起时构建器把 `blocksRaycasts` 设成了 false ✓
+        //（`BuildInvestigationScene` 里那句"缩在齿轮里点不到"✓），但**展开时没人把它打开** ✗ ——
+        // 于是窗口看得见、里面所有按钮都点不动 ✗（CanvasGroup 一关，整棵子树都不吃射线 ✓）。
+        openedUIGroup.blocksRaycasts = true;
+        openedUIGroup.interactable = true;
+
         openedUI.anchoredPosition = localPoint;
 
         Vector2 openedSize = openedUI.sizeDelta;
-        var scaleFrom = Vector3.one;
-        if (closedSize.x > 0.01f && closedSize.y > 0.01f && openedSize.x > 0.01f && openedSize.y > 0.01f)
-        {
-            scaleFrom = new Vector3(closedSize.x / openedSize.x, closedSize.y / openedSize.y, 1f);
-        }
-
-        openedUI.localScale = scaleFrom;
+        float scaleX = closedSize.x / openedSize.x;
+        float scaleY = closedSize.y / openedSize.y;
+        openedUI.localScale = new Vector3(scaleX, scaleY, 1f);
         openedUIGroup.alpha = 0f;
-
-        // 展开 = 可以点：收起时会把 blocksRaycasts 关掉（否则看不见的窗口会挡住下面的 UI），
-        // 不在这里恢复的话，窗口看着正常、里面的按钮却一个都点不动。
-        openedUIGroup.blocksRaycasts = true;
-        openedUIGroup.interactable = true;
 
         openedUI.DOAnchorPos(savedOpenedPos, animationDuration);
         openedUI.DOScale(Vector3.one, animationDuration);
@@ -147,29 +153,24 @@ public class UIWindowManager : MonoBehaviour
     public void Collapse()
     {
         KillTweens();
-        savedOpenedPos = openedUI.anchoredPosition;
-        savedOpenedScale = openedUI.localScale;
 
-        // 和 Expand 同理：closedUI 为空时不要碰它（否则收起也会抛 NullReference）。
-        if (closedUI != null && canvasRect != null)
-        {
-            Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out var localPoint);
-
-            Vector2 openedSize = openedUI.sizeDelta;
-            var scaleTo = Vector3.one;
-            if (closedSize.x > 0.01f && closedSize.y > 0.01f && openedSize.x > 0.01f && openedSize.y > 0.01f)
-            {
-                scaleTo = new Vector3(closedSize.x / openedSize.x, closedSize.y / openedSize.y, 1f);
-            }
-
-            openedUI.DOAnchorPos(localPoint, animationDuration);
-            openedUI.DOScale(scaleTo, animationDuration);
-        }
-        // 收起 = 不吃点击：不然这个已经看不见（甚至已 SetActive(false)）的窗口还会拦着玩法 UI。
+        // 收起过程中先断掉交互 ✓（淡出那 0.4 秒里别让玩家点到正在缩小的按钮 ✓）。
         openedUIGroup.blocksRaycasts = false;
         openedUIGroup.interactable = false;
 
+        savedOpenedPos = openedUI.anchoredPosition;
+        savedOpenedScale = openedUI.localScale;
+
+        Vector3 worldPos = closedUI.TransformPoint(closedUI.rect.center);
+        Vector2 localPoint;
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, worldPos, null, out localPoint);
+
+        Vector2 openedSize = openedUI.sizeDelta;
+        float scaleX = closedSize.x / openedSize.x;
+        float scaleY = closedSize.y / openedSize.y;
+
+        openedUI.DOAnchorPos(localPoint, animationDuration);
+        openedUI.DOScale(new Vector3(scaleX, scaleY, 1f), animationDuration);
         openedUIGroup.DOFade(0f, animationDuration).OnComplete(() =>
         {
             openedUI.gameObject.SetActive(false);

@@ -6,8 +6,10 @@ namespace Project.Gameplay.Scripts.Items
     [CreateAssetMenu(menuName = "Project/Items/Tool Item")]
     public class ToolItem : Item
     {
-        [SerializeField] private int maxDurability = 5;
-        [SerializeField] private int durability = 5;
+        // 兜底值 ✓（真正生效的是每个 ToolItem 资产里的 maxDurability / durability ✓）：
+        // 仪器 10 点 ✓、工具包 5 点 ✓ —— 见 Docs/ContainmentRules.md §2 与 §5.3-1 ✓。
+        [SerializeField] private int maxDurability = 10;
+        [SerializeField] private int durability = 10;
         [SerializeField] private ToolType toolType;
 
         public int MaxDurability => maxDurability;

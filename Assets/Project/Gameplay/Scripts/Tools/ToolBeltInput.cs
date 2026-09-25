@@ -14,7 +14,7 @@ namespace Project.Gameplay.Scripts.Tools
     ///
     /// 拖拽全流程（对应设计规范「工具拖拽流程」）：
     ///   1. 在工具槽上按下 → <see cref="SelectSlot"/>，鼠标移动超过阈值 → <see cref="BeginDrag"/>（广播 OnToolDragStarted + 出现拖拽影子）
-    ///   2. 拖动中 → InteractionManager.OnToolDragUpdated + UIManager.UpdateToolDragIndicator（影子跟随）+ 有效性提示
+    ///   2. 拖动中 → InteractionManager.OnToolDragUpdated + UIManager.UpdateToolDragIndicator（影子跟随，**不提示对不对** ✓）
     ///   3. 松手 → 射线找到指针下的交互物 → CanUseToolOn / ExecuteToolInteraction → OnToolDragEnded
     ///
     /// 输入用轮询（和 Stage2Breach 示例、VnSceneUiView 一致，项目统一走 legacy Input）。
@@ -23,8 +23,8 @@ namespace Project.Gameplay.Scripts.Tools
     {
         [Header("工具槽（元素对齐 BigApp 的 Items 四格）")]
         [SerializeField] private RectTransform[] slotRects = new RectTransform[0];
-        [Tooltip("初始选中的槽位（一般 0 = 第一个工具）。")]
-        [SerializeField] private int initialSelectedSlot;
+        [Tooltip("初始选中的槽位。-1 = 进关卡时什么都不选（默认 ✓）；0..N-1 = 预选某一格。")]
+        [SerializeField] private int initialSelectedSlot = -1;
 
         [Header("初始工具（也可由场景 bootstrapper 覆盖）")]
         [SerializeField] private ToolItem[] tools = new ToolItem[0];
@@ -36,7 +36,8 @@ namespace Project.Gameplay.Scripts.Tools
         [SerializeField] private bool enableKeyboardShortcuts = true;
         [SerializeField] private bool logInput = true;
 
-        private int selectedSlot;
+        // -1 = 还没选任何工具（进关卡时的初始状态 ✓）；只有点了槽位才会变成 0..N-1 ✓
+        private int selectedSlot = -1;
         private bool armed;               // 在槽位上按下了，但还没算拖拽
         private Vector2 armPosition;
         private bool dragging;
@@ -49,7 +50,11 @@ namespace Project.Gameplay.Scripts.Tools
         private void Awake()
         {
             Services.Register<IToolInputService>(this);
-            selectedSlot = Mathf.Max(0, initialSelectedSlot);
+            // 允许 -1（= 没选中）✓ —— 原来用 Max(0,…) 会把 -1 夹成 0 ✗，
+            // 结果一进关卡就等于"选中了第一格"，底部工具槽第 1 格一直高亮 ✗。
+            selectedSlot = initialSelectedSlot < 0
+                ? -1
+                : Mathf.Clamp(initialSelectedSlot, 0, Mathf.Max(0, slotRects.Length - 1));
         }
 
         private void OnDestroy()
@@ -62,6 +67,19 @@ namespace Project.Gameplay.Scripts.Tools
             if (enableKeyboardShortcuts)
             {
                 PollKeyboard();
+            }
+
+            // **右键 = 取消这次拖拽** ✓（工具不落地、不消耗耐久 ✓）：
+            // `EndDrag()` 只收影子 + 通知 ✓，不执行任何交互 ✓ —— 正是"取消"该有的行为 ✓。
+            if (dragging && Input.GetMouseButtonDown(1))
+            {
+                armed = false;
+                EndDrag();
+
+                if (logInput)
+                {
+                    Debug.Log("[ToolBelt] 右键取消拖拽 ✓");
+                }
             }
 
             if (Input.GetMouseButtonDown(0))
@@ -103,6 +121,25 @@ namespace Project.Gameplay.Scripts.Tools
 
             selectedSlot = Mathf.Clamp(slotIndex, 0, slotRects.Length - 1);
             RefreshSlotUi();
+        }
+
+        /// <summary>
+        /// 清空选择：回到「手上什么都没拿」的状态（底部工具槽全部不亮 ✓）。
+        ///
+        /// 为什么要有这个方法，而不是靠 <see cref="initialSelectedSlot"/> 的默认值：
+        /// 那个字段**是序列化的**，场景里存着 `initialSelectedSlot: 0`（= 第一格）——
+        /// 改代码里的默认值对已经存过的场景一点用都没有 ✗（序列化值优先 ✓），
+        /// 所以"进关卡不预选"这件事必须在**运行时**做一次，才不用重建场景 ✓。
+        /// </summary>
+        public void ClearSelection()
+        {
+            selectedSlot = -1;
+            RefreshSlotUi();
+
+            if (logInput)
+            {
+                Debug.Log("[ToolBelt] 清空工具选择：进关卡默认不预选任何工具 ✓");
+            }
         }
 
         public void BeginDragSelectedTool()
@@ -257,28 +294,10 @@ namespace Project.Gameplay.Scripts.Tools
                 uiManager.UpdateToolDragIndicator(screenPosition);
             }
 
-            // 有效性提示：拖到"工具对口"的交互物上才变绿。
-            // 注意不能用 InteractionManager.CanUseToolOn 判断 —— 它只判断"能不能尝试"（任何工具都返回 true），
-            // 工具是否对口由交互物上的规则说了算；用错了仍然可以落下（会走失败文本 + SAN 惩罚那条路）。
-            var target = FindInteractableUnderPointer(screenPosition);
-            var isValid = target != null && draggingTool != null && RuleAllows(target, draggingTool);
-
-            if (Services.TryGet<UIManager>(out var ui))
-            {
-                ui.ShowToolValidity(isValid);
-            }
-        }
-
-        /// <summary>交互物上的规则是否接受这个工具（没有规则就当作接受）。</summary>
-        private static bool RuleAllows(SimpleInteractable target, ToolItem tool)
-        {
-            if (target == null || tool == null)
-            {
-                return false;
-            }
-
-            var rule = target.GetComponent<SampleInteractableRule>();
-            return rule == null || rule.CanUseTool(tool);
+            // **不再报"有效/无效"** ✗→✓ —— 原来拖到"工具对口"的目标上影子会变绿 ✗，
+            // 那等于提前把答案递给玩家 ✓，把"自己试、自己判断"的难度整个抹掉了 ✗。
+            // 对标恐鬼症：随便拖、随便用 ✓，读不读得出东西是玩家自己的事 ✓。
+            // 所以这里只让影子跟随 ✓；颜色在 InvestigationHudView 那边恒为中性 ✓。
         }
 
         private void ReleaseDrag(Vector2 screenPosition)

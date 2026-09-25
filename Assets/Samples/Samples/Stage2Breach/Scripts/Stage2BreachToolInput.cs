@@ -75,7 +75,6 @@ namespace Project.Samples.Stage2Breach.Scripts
             {
                 return;
             }
-
             selectedSlot = slotIndex;
 
             if (Services.TryGet<UIManager>(out var uiManager))
@@ -85,6 +84,34 @@ namespace Project.Samples.Stage2Breach.Scripts
                     uiManager.ShowHint($"当前工具：{tools[selectedSlot].DisplayName}", 1.5f);
                 }
 
+                uiManager.UpdateEquipmentSlots();
+            }
+        }
+
+        /// <summary>
+        /// 换掉这套工具 ✓（`IToolInputService` 的成员 ✓）——
+        /// 背包↔工具包换完之后 <see cref="InventoryManager"/> 会推一次 ✓；不推的话这个示例的工具条还是旧那套 ✗。
+        /// </summary>
+        public void SetTools(IReadOnlyList<ToolItem> source)
+        {
+            if (source == null)
+            {
+                tools = new ToolItem[0];
+            }
+            else
+            {
+                tools = new ToolItem[source.Count];
+                for (var i = 0; i < source.Count; i++)
+                {
+                    tools[i] = source[i];
+                }
+            }
+
+            // 换过之后原来选的槽位可能已经不存在了 ✓（空 = -1 ✓，不硬凑到第一格 ✗）。
+            selectedSlot = tools.Length == 0 ? -1 : Mathf.Clamp(selectedSlot, 0, tools.Length - 1);
+
+            if (Services.TryGet<UIManager>(out var uiManager))
+            {
                 uiManager.UpdateEquipmentSlots();
             }
         }

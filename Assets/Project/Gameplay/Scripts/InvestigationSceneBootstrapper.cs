@@ -107,12 +107,18 @@ namespace Project.Gameplay.Scripts
             ApplyLoadout(inventoryManager,
                 caseDirector != null && caseDirector.EquippedTools.Count > 0 ? caseDirector.EquippedTools : initialTools);
 
+            // 背包 = **整池**（5 件 ✓），工具包 = 案情那套（4 件 ✓）：差的那一件就是玩家可以自己换的 ✓。
+            // 这一步也让剧情里念的"5 件装备"成立 ✓（原来只带 4 件 ✗，见 Docs/ContainmentRules.md §6 ✓）。
+            inventoryManager.SetBackpackItems(
+                caseDirector != null && caseDirector.LoadoutPool.Count > 0 ? caseDirector.LoadoutPool : initialTools);
+
             RefreshHud();
 
-            if (Services.TryGet<UIManager>(out var uiManager))
-            {
-                uiManager.PlaySceneTransition("crt");
-            }
+            // 这里**不再**播全屏 CRT ✗→✓：
+            // 进场过渡已经由入口负责了 —— 从序幕进来是「面板内 CRT」（ProloguePerformanceDirector ✓），
+            // 从主菜单进来是 SceneFlowManager 的全屏 CRT ✓；
+            // 这里再跑一次会变成"黑一下、亮一下、又黑一下"的双过渡 ✗（而且全屏黑会把面板内那次的细节盖掉 ✗）。
+            // 想让这一关自己闪一下开机效果的话，改这句的时长/风格即可，别再加第二次 ✗。
 
             gameManager.SwitchState(GameState.Exploration);
 
@@ -156,6 +162,11 @@ namespace Project.Gameplay.Scripts
             if (belt != null)
             {
                 belt.SetTools(loadout);
+
+                // 装完工具顺手把选择清掉 ✓：进关卡时手上不预选任何工具，底部槽位不亮第一个 ✗。
+                // 必须在**这里**（运行时）清，不能只改 ToolBeltInput 的字段默认值 ——
+                // 那个字段是序列化的，本场景里存的是 0（= 第一格），改代码默认值没用 ✗。
+                belt.ClearSelection();
             }
         }
 

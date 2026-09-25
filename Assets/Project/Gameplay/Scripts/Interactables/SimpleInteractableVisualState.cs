@@ -68,7 +68,12 @@ namespace Project.Gameplay.Scripts.Interactables
 
             if (disableHitAreaWhenCollected && hitArea != null)
             {
-                hitArea.raycastTarget = false;
+                // **不再关掉射线** ✗→✓：老设计是"收集后防止重复点击"✗，
+                // 但现在的口径正好相反 ✓ —— 读过一次只是**解锁收容物** ✓，
+                // 玩家必须还能再点它、才能「拾取」✓。
+                // 关掉射线会出现"只有那件家具点不动"✗✗ —— 而且因为只有**成功读过**的家具会被标记 ✓，
+                // 表现就是"就它点不动、别的都行"✓（用户实测就是这个 ✗）。
+                // 要不要变淡由 `dimWhenCollected` 决定 ✓ —— 那是显示问题 ✓，和能不能点无关 ✓。
             }
         }
     }

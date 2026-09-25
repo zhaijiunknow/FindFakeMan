@@ -33,6 +33,9 @@ namespace Project.Core.Runtime.Managers
         {
             if (isInteractionPaused || interactable == null || !interactable.IsActive)
             {
+                // 诊断 ✓：这条也是静默 return ✗（`PauseInteractions` 一被谁开着 ✓，全场都点不动 ✓，却看不出来 ✓）。
+                Debug.Log($"[Interact] 点击被忽略：paused={isInteractionPaused}，"
+                          + $"active={(interactable != null && interactable.IsActive)} ✓");
                 return;
             }
 

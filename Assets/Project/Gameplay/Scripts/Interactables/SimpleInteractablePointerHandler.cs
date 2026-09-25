@@ -77,6 +77,14 @@ namespace Project.Gameplay.Scripts.Interactables
 
         public void OnPointerClick(PointerEventData eventData)
         {
+            // **右键 = 取消选中** ✓（这类界面的常规手感 ✓）：左键才是"选中 + 开详情区" ✓。
+            if (eventData != null && eventData.button == PointerEventData.InputButton.Right)
+            {
+                Services.TryGet<ISceneUiView>(out var view);
+                view?.ClearSelection();
+                return;
+            }
+
             if (eventData != null && eventData.button != PointerEventData.InputButton.Left)
             {
                 return;
@@ -84,6 +92,9 @@ namespace Project.Gameplay.Scripts.Interactables
 
             if (interactable == null || !interactable.IsActive)
             {
+                // 诊断 ✓：以前这里**静默 return** ✗ —— "点了没反应"就完全查不出是哪儿挡的 ✓。
+                Debug.Log($"[Click] {name} 点击被忽略：interactable={(interactable != null)}，"
+                          + $"IsActive={(interactable != null && interactable.IsActive)} ✓");
                 return;
             }
 

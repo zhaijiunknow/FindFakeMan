@@ -155,6 +155,18 @@ namespace Project.UI
                 // 3. 面板内过场切场景
                 if (Services.TryGet<SceneFlowManager>(out var sceneFlow))
                 {
+                    // 记下序幕雷达此刻扫到的角度：关卡第一帧会从同一角度接着转，
+                    // 于是面板内 CRT 收屏 → 展开的那一下，看起来是同一次旋转没断过 ✓。
+                    var radars = FindObjectsByType<Project.UI.BigApp.RadarEffects>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+                    if (radars != null && radars.Length > 0 && radars[0] != null)
+                    {
+                        Project.Gameplay.Scripts.Case.CaseHandoff.PublishRadarAngle(radars[0].SweepAngle);
+                    }
+                    else
+                    {
+                        Debug.Log("[Prologue] 序幕里没有 RadarEffects（雷达没接），角度没法交接。");
+                    }
+
                     await sceneFlow.LoadSceneAsync(gameplaySceneName, SceneTransitionStyle.PanelLocal);
                 }
                 else

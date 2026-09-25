@@ -56,12 +56,40 @@ namespace Project.Gameplay.Editor
         /// <summary>房间图层的夜版前缀：文件夹里符合它的图层才进关卡（`3a` 是白天版）。</summary>
         private const string NightPrefix = "3b";
 
+        /// <summary>描边 shader ✓（直接引用到组件上 ✓，不靠 `Shader.Find` ✗ —— 那个打包后可能找不到 ✓）。</summary>
+        private const string OutlineShaderPath = "Assets/Project/Resource/UI/Shaders/UiSpriteOutline.shader";
+
+        /// <summary>小软件按钮皮肤的**常态**图 ✓（设置页那套 ✓）。</summary>
+        private const string SmallAppButtonNormalPath = "Assets/Project/Resource/UI/设置/window_button.png";
+
+        /// <summary>小软件按钮皮肤的**悬停**图 ✓。</summary>
+        private const string SmallAppButtonHighlightPath = "Assets/Project/Resource/UI/设置/window_select.png";
+
+        /// <summary>音量条**滑块圆点**的图 ✓（设置页那三行用 ✓）。</summary>
+        private const string SliderHandlePath = "Assets/Project/Resource/UI/设置/slide.png";
+
         /// <summary>文件名里带它的当底图，不当家具。</summary>
         private const string BackgroundKeyword = "背景";
 
         /// <summary>文件名里带它的当特写图层。</summary>
         private const string CloseUpKeyword = "特写";
 
+        /// <summary>
+        /// 家具图层的**渲染顺序**（靠前的先在底层，后面的盖在上面 ✓）。
+        ///
+        /// 为什么需要它：扫描文件夹是按文件名排序的 ✗，顺序会**碰巧**对或错 ✗（换个字就翻 ✗）。
+        /// 现在的约定是：**水渍在最上**（盖在沙发/茶几之上 ✓），其余按"背景 → 吊灯 → 书 → 桌 → 沙发 → 茶几"排 ✓。
+        /// 匹配用"包含"（文件名带 `3b` 前缀 ✓）；不在表里的排在**水渍之前**，彼此仍按文件名排 ✓。
+        /// </summary>
+        private static readonly string[] FurnitureRenderOrder =
+        {
+            "吊灯",
+            "书籍",
+            "木桌",
+            "沙发",
+            "茶几",
+            "水渍",  // 最上：盖在沙发/茶几之上 ✓
+        };
         /// <summary>
         /// 特写 → 家具 的对照表（只有名字对不上时才需要）。
         /// 现有美术：特写叫「3b抽屉特写」，家具叫「3b木桌」，按「X特写 归 X」的约定匹配不上，所以显式指一下。
@@ -115,15 +143,18 @@ namespace Project.Gameplay.Editor
             // 工具走浅青白、线索走各自主题色。想重画用菜单 Tools/Project/Gameplay/Generate Item Icons。
             // 之前探测器借用的是 leida.png 那张雷达盘 —— 那是"大软件"里雷达面板本身的图，
             // 拿来当工具图标会和面板撞脸，所以在建造工具里换成独立图标。
+            // 工具包是**消耗品** ✓：拆夹层 / 撬柜门 ✓（5 点 ✓ —— 一次案情大概撬得开 5 处 ✓）；
+            // 仪器（紫外线 / 探测器 / 温度计 / 录音）各 **10 点** ✓ —— 一件家具一条读数 ✓，
+            // 6 件家具 × 5 条 = 30 条 ✓，四件仪器合起来 40 点 ✓ 刚好够"全读穿"✓（见 Docs/ContainmentRules.md §5.3-1 ✓）。
             var toolKit = CreateToolAsset("Tool_ToolKit", "tool_toolkit", "工具包", "拆开夹层、撬开柜门用的便携工具包。", ToolType.ToolKit, 5, GenerateToolIcons.EnsureIcon(ToolType.ToolKit));
-            var uvLight = CreateToolAsset("Tool_UVLight", "tool_uvlight", "紫外线灯", "照出体液、荧光痕迹的手持紫外线灯。", ToolType.UVLight, 99, GenerateToolIcons.EnsureIcon(ToolType.UVLight));
-            var detector = CreateToolAsset("Tool_Detector", "tool_detector", "便携探测器", "扫描电磁异常（EMF）的便携探测器。", ToolType.Detector, 99, GenerateToolIcons.EnsureIcon(ToolType.Detector));
-            var thermometer = CreateToolAsset("Tool_Thermometer", "tool_thermometer", "红外温度计", "读取表面温度的手持红外温度计。", ToolType.Thermometer, 99, GenerateToolIcons.EnsureIcon(ToolType.Thermometer));
+            var uvLight = CreateToolAsset("Tool_UVLight", "tool_uvlight", "紫外线灯", "照出体液、荧光痕迹的手持紫外线灯。", ToolType.UVLight, 10, GenerateToolIcons.EnsureIcon(ToolType.UVLight));
+            var detector = CreateToolAsset("Tool_Detector", "tool_detector", "便携探测器", "扫描电磁异常（EMF）的便携探测器。", ToolType.Detector, 10, GenerateToolIcons.EnsureIcon(ToolType.Detector));
+            var thermometer = CreateToolAsset("Tool_Thermometer", "tool_thermometer", "红外温度计", "读取表面温度的手持红外温度计。", ToolType.Thermometer, 10, GenerateToolIcons.EnsureIcon(ToolType.Thermometer));
 
             // 录音设备是第 4 种读数（温度 / EMF / 紫外 / 录音）。工具槽只有 4 格，所以它顶掉工具包：
             // 随机案情里"工具包"没有读数作用（它原本是"撬沙发夹层"那段固定内容用的），
             // 资产仍然照建、随时能装回去（给第 5 格留位）。
-            var recorder = CreateToolAsset("Tool_Recorder", "tool_recorder", "录音设备", "录下这件东西周围之前发生过的声音。", ToolType.Recorder, 99, GenerateToolIcons.EnsureIcon(ToolType.Recorder));
+            var recorder = CreateToolAsset("Tool_Recorder", "tool_recorder", "录音设备", "录下这件东西周围之前发生过的声音。", ToolType.Recorder, 10, GenerateToolIcons.EnsureIcon(ToolType.Recorder));
 
             var tools = new[] { recorder, uvLight, detector, thermometer };
 
@@ -132,13 +163,79 @@ namespace Project.Gameplay.Editor
                       + $"温度计={(thermometer != null && thermometer.Icon != null)}"
                       + $"（工具包已生成但没装备，图标={(toolKit != null && toolKit.Icon != null)}；缺图标就只显示空槽）");
 
-            // 线索图标同样代码生成（收容格是"没有图标就不显示"，所以没图标的话收了线索格子里是空的）。
-            var clueStain = CreateClueAsset("Clue_WaterStain", "clue_water_stain", "荧光水渍", "地毯边上一小片干掉的痕迹，在紫外线下发着不该有的冷光。", true, true, "evidence_water_stain", GenerateToolIcons.EnsureClueIcon("Clue_WaterStain"));
-            var clueSofaHair = CreateClueAsset("Clue_SofaHair", "clue_sofa_hair", "坐垫夹层的头发", "缝在坐垫夹层里的头发，颜色和长度都不属于这栋房子的人。", true, true, "evidence_sofa_hair", GenerateToolIcons.EnsureClueIcon("Clue_SofaHair"));
-            var clueDrawerRecord = CreateClueAsset("Clue_DrawerRecord", "clue_drawer_record", "抽屉里的记录", "木桌抽屉夹层里的一张手写记录，字迹在几处突然变形。", true, true, "evidence_drawer_record", GenerateToolIcons.EnsureClueIcon("Clue_DrawerRecord"));
+            // 收容物资产：**每处产地成对** ✓ —— 异常家具掉伪人物品 ✓、正常家具掉正常收容物 ✓，
+            // 两件**都能收容** ✓，只有异常的丢弃才扣 SAN ✓（靠资产自己的 isAnomaly ✓，见 Docs/ContainmentRules.md §1）。
+            // 图标是同一套形状 ✓，正常版走中性灰 ✓（GenerateToolIcons 里分的 ✓）。
 
-            Debug.Log($"[Villa] 线索图标：水渍={(clueStain != null && clueStain.Icon != null)}，头发={(clueSofaHair != null && clueSofaHair.Icon != null)}，"
-                      + $"记录={(clueDrawerRecord != null && clueDrawerRecord.Icon != null)}（收容格是「没有图标就不显示」，所以这三个必须有）");
+            // —— 水渍（地毯边那片痕迹）——
+            var clueStain = CreateClueAsset("Clue_WaterStain", "clue_water_stain", "荧光水渍",
+                "地毯边上一小片干掉的痕迹，在紫外线下发着不该有的冷光。", true, true, "evidence_water_stain",
+                GenerateToolIcons.EnsureClueIcon("Clue_WaterStain"));
+            var clueStainNormal = CreateClueAsset("Clue_WaterStain_Normal", "clue_water_stain_normal", "地毯上的深色痕迹",
+                "地毯边上一小片深色痕迹，看上去只是洒过什么，擦一擦就淡了。", false, true, "evidence_water_stain_normal",
+                GenerateToolIcons.EnsureClueIcon("Clue_WaterStain_Normal"));
+
+            // —— 沙发（客厅 · 交互点 4）——
+            var clueSofaHair = CreateClueAsset("Clue_SofaHair", "clue_sofa_hair", "坐垫夹层的头发",
+                "缝在坐垫夹层里的头发，颜色和长度都不属于这栋房子的人。", true, true, "evidence_sofa_hair",
+                GenerateToolIcons.EnsureClueIcon("Clue_SofaHair"));
+            var clueSofaHairNormal = CreateClueAsset("Clue_SofaHair_Normal", "clue_sofa_hair_normal", "坐垫里的旧发丝",
+                "坐垫夹层里夹着几根发丝，颜色和家里人的一样，缠在缝线上。", false, true, "evidence_sofa_hair_normal",
+                GenerateToolIcons.EnsureClueIcon("Clue_SofaHair_Normal"));
+
+            // —— 木桌抽屉（表外扩展 ✓）——
+            var clueDrawerRecord = CreateClueAsset("Clue_DrawerRecord", "clue_drawer_record", "抽屉里的记录",
+                "木桌抽屉夹层里的一张手写记录，字迹在几处突然变形。", true, true, "evidence_drawer_record",
+                GenerateToolIcons.EnsureClueIcon("Clue_DrawerRecord"));
+            var clueDrawerRecordNormal = CreateClueAsset("Clue_DrawerRecord_Normal", "clue_drawer_record_normal", "抽屉里的便签",
+                "木桌抽屉里的一张便签，写着一串买菜清单，字迹一直是同一个人的。", false, true, "evidence_drawer_record_normal",
+                GenerateToolIcons.EnsureClueIcon("Clue_DrawerRecord_Normal"));
+
+            // —— 茶几抽屉（客厅 · 交互点 1：团建合影）——
+            var clueGroupPhoto = CreateClueAsset("Clue_GroupPhoto", "clue_group_photo", "带红叉的团建合影",
+                "星途科技的团建合影，七个失踪者的脸上各被划了一道红色荧光叉号。", true, true, "evidence_group_photo",
+                GenerateToolIcons.EnsureClueIcon("Clue_GroupPhoto"));
+            var clueGroupPhotoNormal = CreateClueAsset("Clue_GroupPhoto_Normal", "clue_group_photo_normal", "普通团建合影",
+                "星途科技的团建合影，一群人挤在镜头前笑，照片边角有点卷。", false, true, "evidence_group_photo_normal",
+                GenerateToolIcons.EnsureClueIcon("Clue_GroupPhoto_Normal"));
+
+            // —— 天花板西南角（客厅 · 交互点 2：监控）——
+            var clueCeilingPrint = CreateClueAsset("Clue_CeilingPrint", "clue_ceiling_print", "带红手印的监控画面",
+                "天花板角落的监控画面上印着一枚湿红的手印，五指张得很开。", true, true, "evidence_ceiling_print",
+                GenerateToolIcons.EnsureClueIcon("Clue_CeilingPrint"));
+            var clueCeilingPrintNormal = CreateClueAsset("Clue_CeilingPrint_Normal", "clue_ceiling_print_normal", "损坏的安防摄像头",
+                "被砸坏的安防摄像头，外壳裂了，里面的存储卡是空的。", false, true, "evidence_ceiling_print_normal",
+                GenerateToolIcons.EnsureClueIcon("Clue_CeilingPrint_Normal"));
+
+            // —— 书架底层（客厅 · 交互点 3：密封玻璃瓶）——
+            var clueGlassVial = CreateClueAsset("Clue_GlassVial", "clue_glass_vial", "结霜的密封玻璃瓶",
+                "-2℃ 的密封玻璃瓶，瓶壁正往下淌着白霜，靠近能听见极低的嗡鸣。", true, true, "evidence_glass_vial",
+                GenerateToolIcons.EnsureClueIcon("Clue_GlassVial"));
+            var clueGlassVialNormal = CreateClueAsset("Clue_GlassVial_Normal", "clue_glass_vial_normal", "生物实验样本",
+                "贴着「生物实验样本」标签的玻璃瓶，常温，里面的液体很清。", false, true, "evidence_glass_vial_normal",
+                GenerateToolIcons.EnsureClueIcon("Clue_GlassVial_Normal"));
+
+            var allClues = new Item[]
+            {
+                clueStain, clueStainNormal,
+                clueSofaHair, clueSofaHairNormal,
+                clueDrawerRecord, clueDrawerRecordNormal,
+                clueGroupPhoto, clueGroupPhotoNormal,
+                clueCeilingPrint, clueCeilingPrintNormal,
+                clueGlassVial, clueGlassVialNormal,
+            };
+
+            var missingIcons = 0;
+            foreach (var clueAsset in allClues)
+            {
+                if (clueAsset == null || clueAsset.Icon == null)
+                {
+                    missingIcons++;
+                }
+            }
+
+            Debug.Log($"[Villa] 收容物资产 {allClues.Length} 件（6 处产地 × 异常版/正常版 ✓），缺图标 {missingIcons} 件"
+                      + "（收容格是「没有图标就不显示」✗，所以图标必须齐 ✓）");
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             foreach (var leftover in Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None))
@@ -151,13 +248,14 @@ namespace Project.Gameplay.Editor
             CreateEventSystem();
             // 先建 bootstrapper：ToolBeltInput 挂在它身上，UI 里要接线到它的工具槽。
             // 装备位只有 4 格，但工具池有 5 件：把 5 件都给案情，让它每局随机少带一件。
-            CreateBootstrapper(tools, new[] { toolKit, uvLight, detector, thermometer, recorder },
-                new Item[] { clueStain, clueSofaHair, clueDrawerRecord });
+            CreateBootstrapper(tools, new[] { toolKit, uvLight, detector, thermometer, recorder }, allClues);
 
             var canvas = CreateCanvas();
             var roomView = CreateMainWindow(canvas, tools);
             BuildRooms(roomView);
-            CreateCaseResultPanel(canvas);
+            // 结算不再单独开一屏 ✗→✓：结论和「再调查一次 / 结束调查」都长在小软件「笔记」页上
+            // （CaseJournalView + CaseDirector.BuildJournalText ✓）。这里把老场景里那块删掉 ✓。
+            RemoveCaseResultPanel(canvas);
             CreateSmallApp(canvas);
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -325,13 +423,31 @@ namespace Project.Gameplay.Editor
         {
             var go = new GameObject("InvestigationBootstrapper");
             var bootstrapper = go.AddComponent<InvestigationSceneBootstrapper>();
-            go.AddComponent<ToolBeltInput>();
+            var belt = go.AddComponent<ToolBeltInput>();
 
             // 通用关卡器：本局案情（身份 + 读数 + 带哪几件）挂在组装点同一根节点上 —— 组装点自己在 Awake 里
             // GetComponent 找它，所以不用在场景里连引用。种子开关 / 读数区间 / 异常件数 / 装备池都在它身上调。
             var caseDirector = go.AddComponent<CaseDirector>();
             var caseSo = new SerializedObject(caseDirector);
             AssignObjectArray(caseSo.FindProperty("loadoutPool"), loadoutPool);
+
+            // 收容物产地池：关键词 ↔ 异常版 id ↔ 正常版 id，三条按位置一一对应 ✓。
+            // 写进场景而不是只靠代码默认值 ✓ —— 这样你在 Inspector 里调完池子，下次重建不会被冲掉 ✗。
+            AssignStringArray(caseSo.FindProperty("containmentHostKeywords"),
+                new[] { "水渍", "沙发", "木桌", "茶几", "吊灯", "书籍" });
+            AssignStringArray(caseSo.FindProperty("containmentClueIdsAnomaly"),
+                new[]
+                {
+                    "clue_water_stain", "clue_sofa_hair", "clue_drawer_record",
+                    "clue_group_photo", "clue_ceiling_print", "clue_glass_vial",
+                });
+            AssignStringArray(caseSo.FindProperty("containmentClueIdsNormal"),
+                new[]
+                {
+                    "clue_water_stain_normal", "clue_sofa_hair_normal", "clue_drawer_record_normal",
+                    "clue_group_photo_normal", "clue_ceiling_print_normal", "clue_glass_vial_normal",
+                });
+
             caseSo.ApplyModifiedPropertiesWithoutUndo();
 
             var so = new SerializedObject(bootstrapper);
@@ -340,6 +456,71 @@ namespace Project.Gameplay.Editor
             so.FindProperty("initialSanity").intValue = 4;
             so.FindProperty("evidenceGoal").intValue = 3;
             so.FindProperty("branchSeed").intValue = 2050;
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            // 进关卡时**不**预选工具 ✓：-1 = 手上什么都没拿（底部工具槽一格都不亮 ✓）。
+            // 必须显式写成 -1 ✗→✓：int 的默认值是 0，而 0 在 ToolBeltInput 里是"选中第一格"✗，
+            // 于是每次重建出来的场景都会带着 `initialSelectedSlot: 0`，一进关卡就高亮第一个工具 ✗。
+            // （运行时 InvestigationSceneBootstrapper.ApplyLoadout 里还会再清一次 ✓，两处都做才不怕手改场景 ✓。）
+            var beltSo = new SerializedObject(belt);
+            beltSo.FindProperty("initialSelectedSlot").intValue = -1;
+            beltSo.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        /// <summary>给 SerializedProperty 里的 string[] 赋值（和 <see cref="AssignObjectArray"/> 一个套路 ✓）。</summary>
+        private static void AssignStringArray(SerializedProperty property, string[] values)
+        {
+            if (property == null)
+            {
+                return;
+            }
+
+            property.arraySize = values?.Length ?? 0;
+            for (var i = 0; i < property.arraySize; i++)
+            {
+                property.GetArrayElementAtIndex(i).stringValue = values[i] ?? string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 把小软件那套**按钮皮肤**刷到一个按钮上 ✓：常态图 / 悬停图 + **Sprite Swap** 过渡 ✓。
+        ///
+        /// 为什么要构建器来做 ✗→✓：`SmallAppPageStyle` 是静态类 ✓、没有序列化字段 ✓，引不了资产 ✗；
+        /// 而控件本来就是构建器烘进场景的 ✓，皮肤跟着一起烘最省事 ✓（运行时一行都不用写 ✓）。
+        /// 颜色**不动** ✓ —— 设置页那套的 Image 颜色就是原来的 `ButtonColor` ✓，只换了图和过渡方式 ✓。
+        /// </summary>
+        private static void ApplySmallAppButtonSkin(Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            var normal = AssetDatabase.LoadAssetAtPath<Sprite>(SmallAppButtonNormalPath);
+            var highlight = AssetDatabase.LoadAssetAtPath<Sprite>(SmallAppButtonHighlightPath);
+
+            var image = button.targetGraphic as Image ?? button.GetComponent<Image>();
+            if (image != null && normal != null)
+            {
+                image.sprite = normal;
+                image.type = Image.Type.Simple;
+                image.preserveAspect = true; // 设置页那套是 1 ✓（代码默认 0 ✗，会拉变形 ✓）
+            }
+
+            var so = new SerializedObject(button);
+            var transition = so.FindProperty("m_Transition");
+            if (transition != null)
+            {
+                transition.enumValueIndex = 2; // Transition.SpriteSwap ✓
+            }
+
+            var state = so.FindProperty("m_SpriteState");
+            if (state != null)
+            {
+                state.FindPropertyRelative("m_HighlightedSprite").objectReferenceValue = highlight;
+                state.FindPropertyRelative("m_PressedSprite").objectReferenceValue = normal;
+            }
+
             so.ApplyModifiedPropertiesWithoutUndo();
         }
 
@@ -572,7 +753,13 @@ namespace Project.Gameplay.Editor
 
                 // 方向拖拽挂在 **game 板块**上：玩家直接对着房间做手势，雷达表盘只负责显示。
                 // game 的 Image 要吃射线才收得到拖拽；从家具命中区上按下去的拖拽会沿层级冒泡到这里
-                // （uGUI 的拖拽会向上找第一个 IBeginDragHandler），命中区自己没有拖拽处理器，所以不会抢。
+                // （uGUI 的拖拽会向上找**最近的 IDragHandler**，命中区自己没有拖拽处理器，所以不会抢）。
+                //
+                // ⚠️ 还要给 **box（收容格）** 和 **item（工具槽）** 各挂一个 ✓ ——
+                // 它们和 game 是**兄弟子树** ✗：从收容格按下去的拖拽沿父链爬到 BigApp 也碰不到 game 上那个 ✗，
+                // 于是"选中收容格里的东西 → 下拖丢弃"永远是"选中对了、事件根本不到"✗。
+                // 一个子树各挂一个即可：uGUI 只找**最近**的那个 ✓，所以互不干扰、也不会重复执行 ✓
+                //（SAN 滑条 `BigApp/box/life` 自己就是 IDragHandler ✓，它比 box 更近 ✓，不会被抢 ✗）。
                 var dragHost = gameViewport != null ? gameViewport.gameObject : boxGo;
                 if (gameViewport != null)
                 {
@@ -583,16 +770,39 @@ namespace Project.Gameplay.Editor
                     }
                 }
 
-                var dragHandler = dragHost.AddComponent<InspectorDragHandler>();
-                var dso = new SerializedObject(dragHandler);
-                dso.FindProperty("hud").objectReferenceValue = hud;
-                dso.FindProperty("progressView").objectReferenceValue = progressView;
-                dso.FindProperty("upAction").enumValueIndex = (int)ItemActionKind.Pickup;
-                dso.FindProperty("downAction").enumValueIndex = (int)ItemActionKind.Discard;
-                dso.FindProperty("leftAction").enumValueIndex = (int)ItemActionKind.Equip;
-                dso.FindProperty("rightAction").enumValueIndex = (int)ItemActionKind.Inspect;
-                dso.ApplyModifiedPropertiesWithoutUndo();
-                Debug.Log("[Villa] 方向拖拽已接：上=拾取 下=丢弃 左=装备 右=检视；带进度指示器（没填满松手会缓慢回退）");
+                var dragHosts = new List<Transform> { dragHost.transform };
+                foreach (var extraName in new[] { "BigApp/box", "BigApp/item" })
+                {
+                    var extra = root.Find(extraName);
+                    if (extra == null)
+                    {
+                        continue;
+                    }
+
+                    var extraImage = extra.GetComponent<Image>();
+                    if (extraImage != null)
+                    {
+                        extraImage.raycastTarget = true; // 不吃射线就收不到拖拽
+                    }
+
+                    dragHosts.Add(extra);
+                }
+
+                foreach (var host in dragHosts)
+                {
+                    var dragHandler = host.gameObject.AddComponent<InspectorDragHandler>();
+                    var dso = new SerializedObject(dragHandler);
+                    dso.FindProperty("hud").objectReferenceValue = hud;
+                    dso.FindProperty("progressView").objectReferenceValue = progressView;
+                    dso.FindProperty("upAction").enumValueIndex = (int)ItemActionKind.Pickup;
+                    dso.FindProperty("downAction").enumValueIndex = (int)ItemActionKind.Discard;
+                    dso.FindProperty("leftAction").enumValueIndex = (int)ItemActionKind.Equip;
+                    dso.FindProperty("rightAction").enumValueIndex = (int)ItemActionKind.Inspect;
+                    dso.ApplyModifiedPropertiesWithoutUndo();
+                }
+
+                Debug.Log($"[Villa] 方向拖拽已接（{dragHosts.Count} 个接收面：game + box/收容格 + item/工具槽 ✓）："
+                          + "上=拾取 下=丢弃 左=装备 右=检视；带进度指示器（没填满松手会缓慢回退）");
             }
 
             // ---- 工具输入接线：槽位 rect 指向预制体里的四个格子 ----
@@ -629,8 +839,13 @@ namespace Project.Gameplay.Editor
             // 位置不用手摆：这些图都是整帧 3840×2160，家具在哪、什么形状本来就在画里。
             Img(roomView, "RoomBackground", LoadSprite($"{RoomFolder}/{NightPrefix}{BackgroundKeyword}.png"), 0f, 0f, 1f, 1f);
 
+            // 先把渲染顺序理对：水渍要盖在沙发/茶几之上 ✓（沙发 < 茶几 < 水渍 ✓）
+            //（原来靠文件名排序碰巧对错都有可能 ✗，现在按 FurnitureRenderOrder 表排 ✓）。
+            var layers = EnumerateFurnitureLayers();
+            SortByRenderOrder(layers);
+
             var furniture = new List<(string baseName, SampleInteractableRule rule)>();
-            foreach (var layer in EnumerateFurnitureLayers())
+            foreach (var layer in layers)
             {
                 var baseName = Path.GetFileNameWithoutExtension(layer);
                 var displayName = StripVariantPrefix(baseName);
@@ -654,7 +869,9 @@ namespace Project.Gameplay.Editor
                 return;
             }
 
-            Debug.Log($"[Villa] 房间按美术生成：{furniture.Count} 件家具（扫的是 {RoomFolder} 里 {NightPrefix}* 的图层）。");
+            Debug.Log($"[Villa] 房间按美术生成：{furniture.Count} 件家具，渲染顺序（下→上）："
+                      + string.Join(" / ", furniture.ConvertAll(f => StripVariantPrefix(f.baseName)))
+                      + $"（扫的是 {RoomFolder} 里 {NightPrefix}* 的图层）");
 
             // 特写图层按名字绑到家具上（「X特写」→ 家具 X；现有美术名字对不上，见对照表）。
             BindCloseUps(furniture);
@@ -689,7 +906,36 @@ namespace Project.Gameplay.Editor
 
         // ---------- 房间图层的扫描（美术即关卡）----------
 
-        /// <summary>夜版的家具图层：排除底图与特写，按文件名排序（保证 z 序稳定、每局一致）。</summary>
+        /// <summary>
+        /// 按 <see cref="FurnitureRenderOrder"/> 重排图层（**靠前的先进场景 = 在底层** ✓）：
+        /// 现在的约定是水渍盖在最上面 ✓（沙发 &lt; 茶几 &lt; 水渍 ✓）。
+        /// 表里没有的排在表内各项之后、水渍之前，彼此维持原来的文件名顺序 ✓。
+        /// </summary>
+        private static void SortByRenderOrder(List<string> layers)
+        {
+            layers.Sort((a, b) =>
+            {
+                var orderA = RenderOrderOf(a);
+                var orderB = RenderOrderOf(b);
+                return orderA != orderB ? orderA.CompareTo(orderB) : StringComparer.Ordinal.Compare(a, b);
+            });
+        }
+
+        private static int RenderOrderOf(string path)
+        {
+            var name = Path.GetFileNameWithoutExtension(path);
+            for (var i = 0; i < FurnitureRenderOrder.Length; i++)
+            {
+                if (name.Contains(FurnitureRenderOrder[i]))
+                {
+                    return i;
+                }
+            }
+
+            return int.MaxValue;
+        }
+
+        /// <summary>夜版的家具图层：排除底图与特写；顺序交给 <see cref="SortByRenderOrder"/> ✓。</summary>
         private static List<string> EnumerateFurnitureLayers()
         {
             var result = new List<string>();
@@ -814,25 +1060,30 @@ namespace Project.Gameplay.Editor
         }
 
         /// <summary>
-        /// 结算界面：挂在 Canvas 最上层的一个空节点上，**不预先摆界面** ——
-        /// 组件会在玩家交出结论之后自己把那一屏搭出来（顺便借场景里已有的中文 TMP 字体）。
-        /// 所以这里只放一个 RectTransform + 组件，节点本身必须保持 active（否则组件收不到 Update）。
+        /// 把老场景里那块结算界面（`Canvas/CaseResult`）**删掉** ✓。
+        ///
+        /// 结算不再单独开一屏 ✗：判定、真相、读数、种子这些由
+        /// <see cref="Project.Gameplay.Scripts.Case.CaseDirector.BuildJournalText"/> 追加进笔记正文 ✓，
+        /// 「再调查一次 / 结束调查」由笔记页自己的两个格子接手 ✓（<see cref="Project.UI.BigApp.CaseJournalView"/>）。
+        ///
+        /// 为什么是"删"而不是"不建"：重建是幂等的 ✓，这个场景里八成还留着上一次建出来的那一块；
+        /// 留着它也没用了 —— 挂在它上面的 <see cref="Project.UI.BigApp.CaseResultPanel"/> 现在是个空壳 ✗。
         /// </summary>
-        private static void CreateCaseResultPanel(Canvas canvas)
+        private static void RemoveCaseResultPanel(Canvas canvas)
         {
             if (canvas == null)
             {
-                Debug.LogWarning("[Villa] 没有 Canvas，结算界面没建。");
                 return;
             }
 
-            var go = new GameObject("CaseResult", typeof(RectTransform));
-            go.transform.SetParent(canvas.transform, false);
-            Stretch((RectTransform)go.transform);
-            go.transform.SetAsLastSibling(); // 盖在所有东西上面
-            go.AddComponent<CaseResultPanel>();
+            var existing = canvas.transform.Find("CaseResult");
+            if (existing == null)
+            {
+                return;
+            }
 
-            Debug.Log("[Villa] 结算界面已建：Canvas/CaseResult（提交结论后自己搭出那一屏）");
+            UnityEngine.Object.DestroyImmediate(existing.gameObject);
+            Debug.Log("[Villa] 已删除旧结算界面节点：Canvas/CaseResult（结算改在笔记页显示 ✓）");
         }
 
         /// <summary>
@@ -899,6 +1150,34 @@ namespace Project.Gameplay.Editor
                 {
                     Debug.LogWarning("[Villa] 小软件里的 UIWindowManager 没接 openedUIGroup，收起没做。");
                 }
+
+                // 「从哪个位置长出来 / 缩回哪里」：指到 Main 左侧栏那个齿轮（setting_icon）——
+                // 也就是玩家点它打开窗口的那个按钮 ✓，于是收起/展开就是"缩回齿轮 / 从齿轮里长出来" ✓。
+                // （预制体里 closedUI 是空的 ✗，不接的话只会从窗口自身位置淡入 ✗，而且旧代码还会在这一步抛 NRE ✗。）
+                var closedProp = so.FindProperty("closedUI");
+                var canvasTransform = instance.transform.parent;
+                var anchor = canvasTransform != null ? FindChildByName(canvasTransform, "setting_icon") : null;
+                if (closedProp != null && anchor != null)
+                {
+                    closedProp.objectReferenceValue = anchor;
+                }
+                else if (closedProp != null)
+                {
+                    Debug.LogWarning("[Villa] 没找到 LeftApp/setting_icon，小软件只能从窗口自身位置展开。");
+                }
+
+                // 缩到多小：红点大约 24px ✓（它的 rect 是按锚点算的，编辑器里量不到实际像素 ✗，所以直接给值 ✓）。
+                var sizeProp = so.FindProperty("closedSize");
+                if (sizeProp != null)
+                {
+                    sizeProp.vector2Value = new Vector2(24f, 24f);
+                }
+
+                // 标题栏三个键**交给 UIWindowManager** ✓ —— 和 `OpeningCinematic` 那套一致
+                //（红=收起 ✓ 绿=铺满矩形 ✓ 蓝=还原成窗口 ✓），所以这里**不写** `bindWindowButtons` override ✗→✓。
+                // （之前为了"红蓝绿由 SmallAppPageHost 接"才写 false ✗，现在口径改了 ✓ 就别再插一手 ✓。）
+
+                so.ApplyModifiedPropertiesWithoutUndo();
 
                 return;
             }
@@ -1001,8 +1280,38 @@ namespace Project.Gameplay.Editor
                 return null;
             }
 
+            // 玩法场景**只删「进入系统」那颗按钮** ✓ ——
+            // OKAS / system / System_2 / peopleicon 是**显示组件**（窗口上的品牌/标识 ✓），必须留着 ✗→✓。
+            //
+            // 认按钮的办法也是"按角色"而不是按名字 ✗：Content 下**不属于 all_button 的按钮**就是它 ✓
+            //（导出层级核对过 ✓：Content 的子物体里只有 start 是按钮 ✓，其余的按钮都在 all_button 菜单里 ✓）。
+            var menuForDelete = FindChildByName(instance.transform, "all_button");
+            var removedStart = 0;
+            var keptButtons = 0;
+            foreach (var button in content.GetComponentsInChildren<Button>(true))
+            {
+                if (button == null)
+                {
+                    continue;
+                }
+
+                if (menuForDelete != null && button.transform.IsChildOf(menuForDelete))
+                {
+                    keptButtons++; // 菜单里的分页按钮：不动 ✓
+                    continue;
+                }
+
+                Object.DestroyImmediate(button.gameObject);
+                removedStart++;
+            }
+
+            Debug.Log($"[Villa] SmallAppUI/Content：删掉启动按钮 {removedStart} 个 ✓，保留菜单按钮 {keptButtons} 个 ✓，"
+                      + "显示组件（OKAS/system/System_2/peopleicon）原样保留 ✓");
+
             // 页名 ↔ 预制体里已有的按钮名（顺序照界面：上排 潜入/异常相册/道具，下排 设置/系统备份/退出系统）
-            var pageTitles = new[] { "笔记", "线索清单", "道具", "设置", "案件" };
+            // 「系统备份」这一格改用途成"收容"：8 格网格已经满了 ✗，而"案件"信息笔记页顶上已经显示 ✓
+            //（案号 + 本局种子），所以不另开页、也不动 GridLayoutGroup。
+            var pageTitles = new[] { "笔记", "线索清单", "道具", "设置", "收容" };
             var buttonNames = new[] { "潜入", "异常相册", "道具", "设置", "系统备份" };
 
             var pages = new RectTransform[pageTitles.Length];
@@ -1022,16 +1331,25 @@ namespace Project.Gameplay.Editor
             }
 
             // 笔记视图：放进"笔记"页（从此不再挂在窗口根上 ✗，跟着页面一起显隐 ✓）
-            var journal = instance.AddComponent<CaseJournalView>();
+            // 笔记视图：挂在**「笔记」页自己**身上 ✓ —— 挂窗口根上的话，
+            // 它的标题/正文/返回会铺满整个窗口（盖住分页栏 ✗），而且不跟着页面显隐 ✗。
+            var journal = pages[0].gameObject.AddComponent<CaseJournalView>();
             var jso = new SerializedObject(journal);
             jso.FindProperty("minReadings").intValue = 1;
             jso.FindProperty("contentRoot").objectReferenceValue = pages[0];
+            jso.FindProperty("buildAtRuntime").boolValue = false; // 控件下面由 Build() 烘出来 ✓
             jso.ApplyModifiedPropertiesWithoutUndo();
 
-            // 三页只读信息页：线索清单 / 道具 / 案件（各挂一个 CaseInfoPageView，模式不同）。
+            // 构建期就把控件建出来 ✓（编辑态可见/可拖 ✓，存进场景 ✓）；运行时只接点击、不重建 ✓。
+            journal.Build();
+            EditorUtility.SetDirty(journal);
+
+            // 只读信息页：线索清单 / 收容（各挂一个 CaseInfoPageView，模式不同 ✓）。
+            // 「道具」页**不再是只读文字** ✗→✓：它是**背包 ↔ 工具包**的配置台 ✓（见 ToolLoadoutPageView ✓），
+            // 所以从这张表里拿掉 ✗，单独建 ✓。
             // 剩下"设置"页由设置视图负责（照参考图那张 System Setting）。
-            var infoPageIndexes = new[] { 1, 2, 4 };
-            var infoModes = new[] { CasePageMode.Checklist, CasePageMode.Tools, CasePageMode.CaseInfo };
+            var infoPageIndexes = new[] { 1, 4 };
+            var infoModes = new[] { CasePageMode.Checklist, CasePageMode.Containment };
             for (var i = 0; i < infoPageIndexes.Length; i++)
             {
                 var page = pages[infoPageIndexes[i]];
@@ -1043,14 +1361,75 @@ namespace Project.Gameplay.Editor
                 var view = page.gameObject.AddComponent<CaseInfoPageView>();
                 var vso = new SerializedObject(view);
                 vso.FindProperty("mode").enumValueIndex = (int)infoModes[i];
+                vso.FindProperty("buildAtRuntime").boolValue = false;
                 vso.ApplyModifiedPropertiesWithoutUndo();
+
+                // 同样在构建期烘出控件 ✓
+                view.Build();
+                EditorUtility.SetDirty(view);
             }
 
-            // 设置页：照参考图 System Setting（显示模式 + 三条音量 + 返回），视图自己搭版式。
+            // ---- 道具页（pages[2]）：**背包 ↔ 工具包** 的配置台 ✓ ----
+            // 左列 = 背包（本局整池 ✓ 装备清单里念的那几件 ✓）、右列 = 工具包（4 格 ✓），每行一个按钮 ✓。
+            // 它和 HUD 里"左拖 = 装备"调的是**同一套** InventoryManager API ✓（MoveToToolBag / MoveToBackpack ✓），
+            // 所以两条入口永远一致 ✓、不会出现"页面里换了、HUD 还是旧的"✗。
+            if (pages[2] != null)
+            {
+                var loadoutView = pages[2].gameObject.AddComponent<ToolLoadoutPageView>();
+                var lso = new SerializedObject(loadoutView);
+                lso.FindProperty("buildAtRuntime").boolValue = false;
+                lso.ApplyModifiedPropertiesWithoutUndo();
+
+                loadoutView.Build();
+                EditorUtility.SetDirty(loadoutView);
+                Debug.Log("[Villa] 道具页已改造成「背包 ↔ 工具包」配置台（左列背包 / 右列工具包，每行一个按钮 ✓）。");
+            }
+
+            // 设置页：照参考图 System Setting（显示模式 + 三条音量 + 返回），同样在构建期烘出控件 ✓。
             if (pages[3] != null)
             {
-                pages[3].gameObject.AddComponent<SettingsPageView>();
+                var settingsView = pages[3].gameObject.AddComponent<SettingsPageView>();
+                var sso = new SerializedObject(settingsView);
+                sso.FindProperty("buildAtRuntime").boolValue = false;
+
+                // 滑块圆点必须在 `Build()` **之前**塞进去 ✓ —— 那三行音量是 Build 的时候搭的 ✓，
+                // 搭到一半才给图就晚了 ✗（运行时脚本不能用 AssetDatabase ✗，只能这里喂 ✓）。
+                var sliderHandle = AssetDatabase.LoadAssetAtPath<Sprite>(SliderHandlePath);
+                if (sliderHandle != null)
+                {
+                    sso.FindProperty("sliderHandleSprite").objectReferenceValue = sliderHandle;
+                }
+                else
+                {
+                    Debug.LogWarning($"[Villa] 找不到滑块圆点图：{SliderHandlePath} ✗（音量条的圆点会是空白 ✓）。");
+                }
+
+                sso.ApplyModifiedPropertiesWithoutUndo();
+
+                settingsView.Build();
+                EditorUtility.SetDirty(settingsView);
             }
+
+            // ---- 统一刷小软件按钮皮肤 ✓（设置页那套 ✓）----
+            // 页里**所有**按钮都刷一遍 ✓：五页的「返回」✓、笔记页的两个结论格 ✓、道具页那 10 行 ✓。
+            // 只刷**页对象**底下 ✓，不碰预制体自带的菜单 / 窗口按钮 ✗（那些有自己的美术 ✓）。
+            var skinned = 0;
+            foreach (var page in pages)
+            {
+                if (page == null)
+                {
+                    continue;
+                }
+
+                foreach (var button in page.GetComponentsInChildren<Button>(true))
+                {
+                    ApplySmallAppButtonSkin(button);
+                    skinned++;
+                }
+            }
+
+            Debug.Log($"[Villa] 小软件按钮皮肤已刷：{skinned} 个 ✓"
+                      + "（常态 window_button ✓ 悬停 window_select ✓，Sprite Swap ✓）");
 
             // 分页切换器（启动屏 → 进入系统 → 显示菜单与默认页）
             var host = instance.GetComponent<SmallAppPageHost>();
@@ -1060,11 +1439,12 @@ namespace Project.Gameplay.Editor
             }
 
             var hso = new SerializedObject(host);
-            AssignGameObjectArray(hso.FindProperty("startScreen"),
-                FindChildByName(instance.transform, "OKAS"),
-                FindChildByName(instance.transform, "system"),
-                FindChildByName(instance.transform, "System_2"),
-                FindChildByName(instance.transform, "peopleicon"));
+
+            // 玩法场景**没有启动屏** ✓（skipStartScreen = true ✓，启动按钮也已经被删掉 ✓），
+            // 所以 startScreen 留空 ✓ —— 原来把那 4 个显示组件（OKAS / system / System_2 / peopleicon）
+            // 同时塞进 startScreen 和 menuExtras ✗，两套逻辑抢着开关它们 ✗。
+            // 按口径它们**只跟 `all_button`（= menuRoot）走** ✓：菜单在就显示 ✓、进子页就收 ✓。
+            AssignGameObjectArray(hso.FindProperty("startScreen"));
 
             var startTransform = FindChildByName(instance.transform, "start");
             hso.FindProperty("startButton").objectReferenceValue =
@@ -1074,6 +1454,13 @@ namespace Project.Gameplay.Editor
             hso.FindProperty("menuRoot").objectReferenceValue =
                 menuTransform != null ? menuTransform.gameObject : null;
 
+            // 只在菜单上显示的显示组件（品牌/标识 ✓）：进子页时跟着菜单一起收 ✓
+            AssignGameObjectArray(hso.FindProperty("menuExtras"),
+                FindChildByName(instance.transform, "OKAS"),
+                FindChildByName(instance.transform, "system"),
+                FindChildByName(instance.transform, "System_2"),
+                FindChildByName(instance.transform, "peopleicon"));
+
             var pagesProp = hso.FindProperty("pages");
             pagesProp.arraySize = pageTitles.Length;
             for (var i = 0; i < pageTitles.Length; i++)
@@ -1082,13 +1469,70 @@ namespace Project.Gameplay.Editor
                 entry.FindPropertyRelative("title").stringValue = pageTitles[i];
 
                 var buttonTransform = FindChildByName(instance.transform, buttonNames[i]);
+
+                // 按钮上显示的文字也要换成页名 ✓ —— 预制体里那套是「潜入 / 异常相册 / 系统备份」✗，
+                // 不换的话接口是新的、看到的还是旧名字 ✗（这次就是漏了这一步 ✗）。
+                if (buttonTransform != null)
+                {
+                    var label = buttonTransform.GetComponentInChildren<TextMeshProUGUI>(true);
+                    if (label != null)
+                    {
+                        label.text = pageTitles[i];
+                    }
+
+                    // 层级里也换成页名，方便以后对着读 ✓（每次构建都从预制体重新实例化，不会累积改名 ✓）。
+                    buttonTransform.name = $"Btn_{pageTitles[i]}";
+                }
+
                 entry.FindPropertyRelative("button").objectReferenceValue =
                     buttonTransform != null ? buttonTransform.GetComponent<Button>() : null;
                 entry.FindPropertyRelative("page").objectReferenceValue =
                     pages[i] != null ? pages[i].gameObject : null;
+
+                // 把"点这个按钮 → 切到哪一页"写在 ButtonAction 上 ✓（Inspector 里可见、可改 ✓），
+                // 比运行时挂监听清楚 ✓。两个"不猜"：按**类型名**取组件 ✓、按 **enumNames 找枚举名** ✓。
+                if (buttonTransform != null)
+                {
+                    var action = buttonTransform.GetComponent("ButtonAction");
+                    if (action != null)
+                    {
+                        var aso = new SerializedObject(action);
+                        var typeProp = aso.FindProperty("actionType");
+                        var actionNames = typeProp != null ? typeProp.enumNames : null;
+                        if (actionNames != null)
+                        {
+                            for (var k = 0; k < actionNames.Length; k++)
+                            {
+                                if (actionNames[k] == "ShowSmallAppPage")
+                                {
+                                    typeProp.enumValueIndex = k;
+                                    break;
+                                }
+                            }
+                        }
+
+                        var targetProp = aso.FindProperty("targetObject");
+                        if (targetProp != null)
+                        {
+                            targetProp.objectReferenceValue = pages[i] != null ? pages[i].gameObject : null;
+                        }
+
+                        aso.ApplyModifiedPropertiesWithoutUndo();
+                        Debug.Log($"[Villa] {buttonTransform.name} → ButtonAction.ShowSmallAppPage"
+                                  + $"（目标 {(pages[i] != null ? pages[i].name : "null")}）✓");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Villa] {buttonTransform.name} 上没有 ButtonAction，切页改不了数据驱动。");
+                    }
+                }
             }
 
             hso.FindProperty("defaultPage").intValue = 0;
+
+            // 玩法场景不要启动屏：一打开就是菜单 ✓（「进入系统」那一拍留给序幕/开场那种"终端启动" ✓）。
+            hso.FindProperty("skipStartScreen").boolValue = true;
+
             hso.ApplyModifiedPropertiesWithoutUndo();
 
             Debug.Log($"[Villa] 小软件分页已建：{string.Join(" / ", pageTitles)}"
@@ -1201,9 +1645,39 @@ namespace Project.Gameplay.Editor
             vso.FindProperty("hitArea").objectReferenceValue = layer;
             vso.ApplyModifiedPropertiesWithoutUndo();
 
-            // 悬停描边（淡蓝，和窗口 UI 一套）：整帧图的描边是 N 份偏移副本，
-            // 所以组件默认 hoverOnly + generateOnAwake=false —— 只有鼠标停在上面时才长出来。
-            layerGo.AddComponent<SpriteOutline>();
+            // 悬停描边（淡蓝，和窗口 UI 一套）：**1 份副本 + `Project/UI Sprite Outline` shader** ✓ ——
+            // shader 里算"膨胀后的轮廓 减去 自己" ✓，所以只画原图外面那一圈 ✓、原图（含半透明软边 ✓）一个像素都不叠 ✓
+            //（老的"1 张图偏移叠 8 份"会让原图软边透色 ✗ = "挂上描边后原图轻微变色"✗，已换掉 ✓）。
+            // shader 直接引用到组件上 ✓（`Shader.Find` 只在编辑器里稳 ✗，打包后可能找不到 ✓）。
+            var outline = layerGo.AddComponent<SpriteOutline>();
+            var outlineSo = new SerializedObject(outline);
+            var outlineShader = AssetDatabase.LoadAssetAtPath<Shader>(OutlineShaderPath);
+            if (outlineShader != null)
+            {
+                outlineSo.FindProperty("outlineShader").objectReferenceValue = outlineShader;
+            }
+            else
+            {
+                Debug.LogWarning($"[Villa] 找不到描边 shader：{OutlineShaderPath} ✗"
+                                 + "（组件会退回 Shader.Find ✓，但打包后可能失效 ✗）。");
+            }
+
+            outlineSo.ApplyModifiedPropertiesWithoutUndo();
+
+            // 水渍特殊：它的位置每局在指定四边形内随机 ✓
+            // （整块矩形平移 → 画出来的位置和 alpha 命中的位置始终一致 ✓，悬停描边也跟着走 ✓）。
+            // 四边形两个角用组件默认值（-219,95 → 358,190 ✓）；这里只按 PNG 算出的不透明中心填进去 ✓。
+            if (displayName.Contains("水渍"))
+            {
+                var placement = layerGo.AddComponent<RandomPlacement>();
+                var placementSo = new SerializedObject(placement);
+                placementSo.FindProperty("opaqueCenter").vector2Value = new Vector2(bounds.center.x, bounds.center.y);
+                placementSo.FindProperty("randomGroup").stringValue = "placement:水渍";
+                placementSo.ApplyModifiedPropertiesWithoutUndo();
+
+                Debug.Log($"[Villa] 水渍已接随机摆放：四边形用组件默认值（美术定好的斜四边形 ✓），"
+                          + $"图内不透明中心 ({bounds.center.x:0.###}, {bounds.center.y:0.###})（归一化 ✓）");
+            }
 
             Debug.Log($"[Villa] 交互物 {interactableId}（{displayName}）整帧图 alpha 命中，不透明范围 {bounds.xMin:0.###},{bounds.yMin:0.###} {bounds.width:0.###}×{bounds.height:0.###}");
             return rule;

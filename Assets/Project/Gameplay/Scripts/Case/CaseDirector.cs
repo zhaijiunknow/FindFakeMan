@@ -40,11 +40,23 @@ namespace Project.Gameplay.Scripts.Case
         /// <summary>录音读数的内容（录音笔用：异常 = 嘶吼，正常 = 平稳呼吸）。</summary>
         public AudioType Audio;
 
-        /// <summary>这条读数是不是异常（伪人局的"真的有问题"那些家具为 true）。</summary>
+        /// <summary>这条读数是不是异常 ✓（= 档位不是「正常」✓ —— 见 <see cref="ReadingStrength"/> ✓）。</summary>
         public bool IsAnomaly;
 
-        /// <summary>玩家是否已经读过它（同一件只算一次）。</summary>
+        /// <summary>
+        /// 这件家具**离主场多近** ✓（0~1 ✓）—— 每条读数落"强 / 弱 / 正常"哪一档由它算出来 ✓。
+        /// 诱饵的强度是 **0** ✓（离得近、读数却比远处还干净 ✓ —— 故意的 ✓）。
+        /// </summary>
+        public float AnomalyStrength;
+
+        /// <summary>玩家是否已经读过它 ✓（**证据按"一处产地算一条"** ✓ —— 闸门就在这儿 ✓）。</summary>
         public bool Read;
+
+        /// <summary>这件家具一共读出过几条读数 ✓（五把工具各一条 ✓ —— 判定权重迟早要拿它算 ✓）。</summary>
+        public int ReadingsTaken;
+
+        /// <summary>其中几条是异常的 ✓（和上一条一起决定"这件到底有多可疑"✓）。</summary>
+        public int AnomalousReadings;
 
         /// <summary>读数文案（由 CaseDirector 生成，规则直接拿去显示）。</summary>
         public string SuccessText;
@@ -78,9 +90,118 @@ namespace Project.Gameplay.Scripts.Case
         [Tooltip("forceIdentity 勾上时：true = 本局必定是伪人。")]
         [SerializeField] private bool forcedFakeHuman = true;
 
+        [Header("读数种类表")]
+        [Tooltip("读数种类表 ✓（`Tools/Project/Case/Create Reading Kind Table` 生成 ✓）。\n"
+                 + "**留空也能跑** ✓ —— 那时用代码里的兜底表 ✓；想加新读数就在表里加一行 ✓。")]
+        [SerializeField] private ReadingKindTable readingKindTable;
+
+        private ReadingKindTable fallbackTable;
+
+        [Header("异常强度（主场衰减 + 诱饵 ✓ —— 见 Docs/ContainmentRules.md §5.3-1 ✓）")]
+        [Tooltip("衰减半径（像素 ✓）。**留 0 = 按房间自己算** ✓（取最远那对家具距离的一半 ✓）—— 换场景不用重填 ✓。")]
+        [SerializeField] private float anomalyDecayRadius;
+
+        [Tooltip("强度抖动 ±这个数 ✓。0 = 只有距离说了算 ✓（同心圆 ✗，玩家拿尺子量距离就能反推 ✗）。")]
+        [SerializeField, Range(0f, 0.5f)] private float anomalyJitter = 0.18f;
+
+        [Tooltip("诱饵件数上限 ✓：从离主场最近的那几件里挑 ✓，它的读数反而比远处还干净 ✓。")]
+        [SerializeField] private int maxDecoys = 2;
+
+        [Tooltip("这一局出现诱饵的概率 ✓ —— **默认 10%** ✓：诱饵要当**意外** ✓，"
+                 + "每局都来就变成一条可预期的规律了 ✗（玩家两局就会学会\"近处不算数\"✗）。")]
+        [SerializeField, Range(0f, 1f)] private float decoyChance = 0.1f;
+
+        [Tooltip("**主场可以有几个** ✓：1 = 单源 ✓、2 = 双源 ✓（两个源各自衰减 ✓，中间会互相叠加 ✓）。")]
+        [SerializeField, Range(1, 4)] private int maxOrigins = 2;
+
+        [Tooltip("**调试用** ✓：填家具关键词（例如「沙发」「木桌」✓）就**强制**这几件当主场 ✓，留空 = 按种子抽 ✓。\n"
+                 + "想复现某个特定布局（比如故意让两个源离得很远 ✓）就填它 ✓。※ 上线前必须清空 ✗。")]
+        [SerializeField] private string[] debugForceOrigins = new string[0];
+
+        /// <summary>
+        /// 用的那张读数种类表 ✓：接了资产就用资产 ✓，没接就用兜底表 ✓
+        ///（谁忘了连资产都不会把游戏弄坏 ✗ ✓）。
+        /// </summary>
+        private ReadingKindTable Table
+        {
+            get
+            {
+                if (readingKindTable != null)
+                {
+                    return readingKindTable;
+                }
+
+                return fallbackTable != null
+                    ? fallbackTable
+                    : fallbackTable = ReadingKindTable.CreateDefaultInstance();
+            }
+        }
+
         [Header("装备")]
         [Tooltip("可带的工具池（5 件）。每局从这里随机少带一件 —— 装备位有几格就带几件；留空 = 不换装备。")]
         [SerializeField] private ToolItem[] loadoutPool = new ToolItem[0];
+
+        [Header("收容物（见 Docs/ContainmentRules.md §1、§3.3）")]
+        [Tooltip("家具名关键词：家具 id（obj_3b水渍）里含它的才有资格当产地 ✓。和下面两条按位置一一对应 ✓。")]
+        [SerializeField] private string[] containmentHostKeywords = { "水渍", "沙发", "木桌", "茶几", "吊灯", "书籍" };
+        [Tooltip("**异常**家具产出的收容物 id ✓（伪人物品 ✓，丢弃要扣 SAN ✓）。")]
+        [SerializeField] private string[] containmentClueIdsAnomaly =
+        {
+            "clue_water_stain", "clue_sofa_hair", "clue_drawer_record",
+            "clue_group_photo", "clue_ceiling_print", "clue_glass_vial",
+        };
+        [Tooltip("**正常**家具产出的收容物 id ✓（同样是收容物 ✓ 也能收容 ✓，只是不扣 SAN ✓）。")]
+        [SerializeField] private string[] containmentClueIdsNormal =
+        {
+            "clue_water_stain_normal", "clue_sofa_hair_normal", "clue_drawer_record_normal",
+            "clue_group_photo_normal", "clue_ceiling_print_normal", "clue_glass_vial_normal",
+        };
+        [Tooltip("本局收容物件数的下限 —— 从种子摇 ✓。设成 0 就允许「这一局一件收容物都没有」✓。")]
+        [SerializeField] private int minContainmentClues = 1;
+        [Tooltip("上限 ✓。收容箱一共 3 格 ✓，别设得比它大太多 ✗。")]
+        [SerializeField] private int maxContainmentClues = 3;
+        [Tooltip("只在伪人局产出收容物 ✗ —— **默认关掉** ✓：正常人局也有正常收容物 ✓，只是不扣 SAN ✓。")]
+        [SerializeField] private bool containOnlyInFakeHumanCase;
+
+        /// <summary>
+        /// 本局可用的**整池**工具 ✓（= 背包里那几件 ✓）—— bootstrapper 拿它填 `InventoryManager.SetBackpackItems` ✓。
+        /// 注意和 <see cref="EquippedTools"/> 的区别 ✗：那个是**案情决定的、装进工具包的那套** ✓（4 件 ✓），
+        /// 这个是**背包里的全部** ✓（5 件 ✓），两者的差就是玩家能自己换的那一格 ✓。
+        /// </summary>
+        public IReadOnlyList<ToolItem> LoadoutPool => loadoutPool;
+
+        /// <summary>本局**收容物产地**的一行 ✓：哪件家具 ✓、产出哪件收容物 ✓。</summary>
+        public readonly struct ClueSite
+        {
+            public readonly string Host;
+            public readonly string ClueId;
+            public readonly string ClueName;
+
+            public ClueSite(string host, string clueId, string clueName)
+            {
+                Host = host;
+                ClueId = clueId;
+                ClueName = clueName;
+            }
+        }
+
+        private readonly List<ClueSite> clueSites = new();
+
+        /// <summary>
+        /// 本局**真正挂上**的收容物产地 ✓（挂载失败的不算 ✓）。
+        ///
+        /// 为什么要它 ✗→✓：产地是按种子抽的 ✓（池子里 6 处只挑 1~3 处 ✓），
+        /// 玩家（和测试时的我们自己 ✓）光看"产地 1 处"根本不知道该去翻哪件家具 ✗ ——
+        /// 「收容」页拿这份清单直接写"去哪儿拿什么、收没收" ✓。
+        /// </summary>
+        public IReadOnlyList<ClueSite> ClueSites => clueSites;
+
+        [Tooltip("**调试用** ✓：打开后「收容」页会把本局产地（哪件家具有什么）直接列出来 ✓。"
+                 + "默认**必须关着** ✗ —— 那等于把「该翻哪儿」告诉玩家 ✓，调查就没得玩了 ✗。")]
+        [SerializeField] private bool debugShowClueSites;
+
+        /// <summary>「收容」页是否列出产地清单 ✓（默认关 ✓，见上面那条 Tooltip 的理由 ✗）。</summary>
+        public bool DebugShowClueSites => debugShowClueSites;
 
         [Header("线索分布")]
         [Tooltip("本局读数异常的家具件数下限（会被房间里的家具总数夹住）。")]
@@ -200,6 +321,7 @@ namespace Project.Gameplay.Scripts.Case
             if (readOrder.Count == 0)
             {
                 text.AppendLine("还没有读到任何读数。用底部工具槽里的工具去查房间里的东西。");
+                AppendResult(text);
                 return text.ToString();
             }
 
@@ -213,7 +335,49 @@ namespace Project.Gameplay.Scripts.Case
                 text.AppendLine($"· {name}：{spec.SuccessText}");
             }
 
+            AppendResult(text);
             return text.ToString();
+        }
+
+        /// <summary>
+        /// 提交结论之后追加的「结论」段 ✓。
+        ///
+        /// 为什么写进笔记正文、而不是另开一屏结算界面：玩家本来就是**坐在笔记这一页上**下的结论 ✓，
+        /// 结果长在同一页上最自然 ✓。原来那块盖住整个窗口的结算板（CaseResult）已经不要了 ✗；
+        /// 它那两个按钮（再调查一次 / 结束调查）现在由笔记页自己的两个格子接手 ✓。
+        /// </summary>
+        private void AppendResult(System.Text.StringBuilder text)
+        {
+            if (!submitted)
+            {
+                return;
+            }
+
+            text.AppendLine();
+            text.AppendLine("── 结论 ──");
+            text.AppendLine(LastVerdictCorrect ? "判断正确 ✓" : "判断错误 ✗");
+
+            if (!string.IsNullOrEmpty(LastResultText))
+            {
+                text.AppendLine(LastResultText);
+            }
+
+            text.AppendLine($"真相：目标其实是{(isFakeHuman ? "伪人" : "普通人")}。");
+            text.AppendLine($"读数：异常 {foundAnomalies} 条（判定需要 {corroborationNeeded} 条），"
+                            + $"一共读过 {readOrder.Count} 件家具。");
+            text.AppendLine($"本局种子 {seed}（同一颗种子会摇出同一份案情）");
+
+            // 只有"读数不够却判对"和"读数够了却判错"这两种情况值得多说一句 ✓，其它情况不用画蛇添足 ✗。
+            if (LastVerdictCorrect && !IsEnoughToConclude)
+            {
+                text.AppendLine("读数还不够互相印证 —— 这一把是赌对的 ✓");
+            }
+            else if (!LastVerdictCorrect && IsEnoughToConclude)
+            {
+                text.AppendLine("读数其实已经够互相印证了，但结论下反了 ✗");
+            }
+
+            text.AppendLine("要接着查就按「再调查一次」，看完了按「结束调查」。");
         }
 
         private void Awake()
@@ -251,6 +415,7 @@ namespace Project.Gameplay.Scripts.Case
             seed = seedValue;
             specs.Clear();
             readOrder.Clear();
+            clueSites.Clear();
             foundAnomalies = 0;
             submitted = false;
 
@@ -290,6 +455,10 @@ namespace Project.Gameplay.Scripts.Case
 
             var availableKinds = BuildAvailableKinds(equippedTools);
 
+            // 位置按贴图 alpha 重心算 ✓ —— 家具在运行中可能被挪过（水渍那种 ✓），
+            // 所以每局开头清一次缓存 ✓，别把上一局的位置带到这一局 ✗。
+            CenterCache.Clear();
+
             var targets = FindTargets();
             if (targets.Count == 0)
             {
@@ -297,21 +466,35 @@ namespace Project.Gameplay.Scripts.Case
                 return;
             }
 
-            // 哪几件"真的有异常"：只对伪人局有意义。正常人局全部是正常读数，
-            // 玩家应该读到"哪儿都没问题"再下「正常人」的结论。
-            var anomalySet = new HashSet<int>();
+            // **异常有源头** ✓：不再是"随便挑几件算异常" ✗ —— 按种子挑 **1 件主场** ✓，
+            // 再按**距离衰减**给每件家具算强度 ✓（越靠近源头越强 ✓），最后插 1~2 件**诱饵** ✓
+            //（离源头近、读数反而比远处更干净 ✓ —— 故意的混淆视听 ✓，见 Docs/ContainmentRules.md §5.3-1 ✓）。
+            // 正常人局没有源头 ✓ → 全部强度 0 ✓（玩家该读到"哪儿都没问题"✓）。
+            var strengths = new float[targets.Count];
+            var decoySet = new HashSet<int>();
+            var origins = new List<int>();
+
             if (isFakeHuman)
             {
-                var upper = Mathf.Clamp(maxAnomalyTargets, 1, targets.Count);
-                var lower = Mathf.Clamp(minAnomalyTargets, 1, upper);
-                var anomalyCount = rng.Next(lower, upper + 1);
+                origins = PickOrigins(targets, rng);
+                ApplyAnomalyStrengths(targets, origins, strengths, rng);
+                PickDecoys(targets, origins, strengths, decoySet, rng);
+            }
 
-                var order = BuildShuffledOrder(targets.Count, rng);
-                for (var i = 0; i < anomalyCount && i < order.Count; i++)
+            // "异常家具" = 强度够高那几件 ✓ —— 下游的**产地优先 / 证据 / 判定全部照旧用它** ✓，
+            // 只是它的含义从"随机挑中"变成了"**离源头够近**"✓（诱饵强度是 0 ✓ 自然不算 ✓）。
+            var anomalySet = new HashSet<int>();
+            for (var i = 0; i < strengths.Length; i++)
+            {
+                if (strengths[i] >= AnomalyThreshold)
                 {
-                    anomalySet.Add(order[i]);
+                    anomalySet.Add(i);
                 }
             }
+
+            // 收容物产地：**由种子挑** ✓，不是写死的映射 ✗ —— 件数摇 ✓、产地在池子里挑 ✓、异常家具优先 ✓。
+            // 于是：同一颗种子永远同一批产地 ✓（这就是你说的"部分交互点固定产出"✓），换种子才会换位置 ✓。
+            var clueHosts = PickContainmentHosts(targets, anomalySet, rng, isFakeHuman);
 
             for (var i = 0; i < targets.Count; i++)
             {
@@ -326,8 +509,27 @@ namespace Project.Gameplay.Scripts.Case
                 var isAnomaly = anomalySet.Contains(i);
                 var spec = BuildSpec(furnitureRng, interactable, kind, isAnomaly);
 
+                // 这件家具离**主场**多近 ✓ —— 每条读数落"强 / 弱 / 正常"哪一档，就由它算 ✓。
+                spec.AnomalyStrength = strengths[i];
+
                 specs[id] = spec;
                 rule.ConfigureFromCase(spec, inspectionRequiredChance > 0f && furnitureRng.NextDouble() < inspectionRequiredChance);
+
+                // **一件家具一整套读数** ✓：种类 ✓、工具 ✓、三档数值 ✓、三档文案 ✓ **全部来自读数种类表** ✓，
+                // 而"落哪一档"由**强度 × 这条读数的敏感度**决定 ✓ —— 于是同一件上天然有强有弱 ✓
+                //（不再是"每条各掷 30%"那种和空间无关的随机 ✗）。
+                foreach (var reading in BuildReadings(spec, furnitureRng))
+                {
+                    rule.AddReading(reading);
+                }
+
+                // 这件家具是不是本局的收容物产地 ✓ —— 由上面按种子挑好的表决定 ✓。
+                // 产哪一件看**这处异常不异常** ✓：异常家具给伪人物品 ✓、正常家具给正常收容物 ✓
+                //（两件都是收容物 ✓ 都能收容 ✓，只有异常的丢弃才扣 SAN ✓ —— 见 Docs/ContainmentRules.md §1）。
+                if (clueHosts.TryGetValue(i, out var pair))
+                {
+                    AttachContainmentClue(rule, spec, spec.IsAnomaly ? pair.Anomaly : pair.Normal);
+                }
             }
 
             // 证据读数的目标值就是"要凑够几条异常"：EvidenceManager 顺带负责 HUD 那行显示和 flag。
@@ -345,30 +547,706 @@ namespace Project.Gameplay.Scripts.Case
                     ? string.Join(" / ", equippedTools.ConvertAll(t => t != null ? t.DisplayName : "?"))
                     : "场景固定装备";
 
+                // **主场 / 诱饵必须打出来** ✓ —— 这套模型光看"异常 3 件"根本验证不了 ✗：
+                // 有了这两行，一局打完就能对照"谁在源头 ✓、谁是诱饵 ✓、读数档位对不对"✓。
+                var originText = origins.Count > 0
+                    ? string.Join(" / ", origins.ConvertAll(index => targets[index].Interactable.InteractableId))
+                    : "（无 ✓ 正常人局）";
+
+                var decoyNames = new List<string>();
+                foreach (var index in decoySet)
+                {
+                    decoyNames.Add(targets[index].Interactable.InteractableId);
+                }
+
+                var decoyText = decoyNames.Count > 0 ? string.Join(" / ", decoyNames) : "无";
+
                 Debug.Log($"[Case] 本局案情已生成：种子 {seed}，身份 {(isFakeHuman ? "伪人" : "正常人")}，"
-                          + $"家具 {targets.Count} 件，其中异常 {anomalySet.Count} 件，需要 {corroborationNeeded} 条互相印证；"
-                          + $"带进场：{loadoutText}。");
+                          + $"家具 {targets.Count} 件，其中异常（强度 ≥ {AnomalyThreshold:0.00}）{anomalySet.Count} 件，"
+                          + $"需要 {corroborationNeeded} 条互相印证；带进场：{loadoutText}。");
+                // **用的是哪张表必须打出来** ✓ —— 否则"资产接了没生效"✗ 只能靠翻代码反推 ✓
+                //（这一次就是这么被问出来的 ✗）：一眼就能分清"在跑资产 ✓"还是"资产没接 ✗、跑兜底 ✓"。
+                Debug.Log($"[Case] 读数种类表：{(readingKindTable != null ? $"{readingKindTable.name}（资产 ✓）" : "代码兜底 ✓ —— 资产没接 ✗")}；"
+                          + $"主场：{originText}；"
+                          + $"诱饵（离得近、读数反而更干净 ✓）：{decoyText}；"
+                          + $"衰减半径 {(int)ResolveDecayRadius(targets)} 像素（0 = 按房间自动 ✓）");
+
+                // **每件家具的强度也打出来** ✓ —— "这一局的异常到底在哪"就不该靠猜 ✗：
+                // 强度最高的是源头 ✓、标 ☆ 的是诱饵（强度 0 ✓）、标 ● 的是够门槛的异常家具 ✓。
+                for (var i = 0; i < targets.Count; i++)
+                {
+                    var marker = origins.Contains(i)
+                        ? " ★主场"
+                        : decoySet.Contains(i)
+                            ? " ☆诱饵"
+                            : anomalySet.Contains(i) ? " ●异常" : string.Empty;
+
+                    var center = WorldCenter(targets[i].Interactable);
+
+                    Debug.Log($"[Case] 强度：{targets[i].Interactable.InteractableId} = {strengths[i]:0.00}{marker}"
+                              + $"（中心 {center.x:0}, {center.y:0}）");
+                }
             }
         }
 
-        /// <summary>规则读完一条观测后叫它：同一件只算一次，异常就 +1 并记进证据。</summary>
-        public void NotifyRead(string interactableId)
+        /// <summary>
+        /// 按种子挑出本局的收容物产地 ✓（表在 Inspector 上，见 Docs/ContainmentRules.md §1）。
+        ///
+        /// 规则：
+        ///  - 只在伪人局 ✓（正常人局没有「伪人物品」可收 ✓）；
+        ///  - **件数**从案情总流摇 ✓（`Case` 桶 → 跟种子走 ✓），范围由 min/max 控制 ✓；
+        ///  - 产地只在「关键词 ↔ 收容物」池子里挑 ✓ —— 池子是写死的 ✓，因为每件收容物的美术本来
+        ///    就和某件家具绑死 ✓（荧光水渍只能长在水渍上 ✗ 不可能长在吊灯上 ✓）；
+        ///  - **异常家具优先** ✓：先挑本局判成异常的那些 ✓，不够再按洗牌顺序补 ✓。
+        ///    优先是刻意的 ✓：读数指哪儿，那里就该收东西 ✓ —— 玩家的"查 → 收"才是一条线 ✓。
+        ///
+        /// 所以收容物**不是**固定长在三件家具上 ✗：换种子就换位置 ✓，也可能一件都不出 ✓（min 设 0 时 ✓）。
+        /// </summary>
+        private Dictionary<int, (string Anomaly, string Normal)> PickContainmentHosts(
+            IReadOnlyList<Target> targets, HashSet<int> anomalies, CaseRandom rng, bool fakeHuman)
+        {
+            var result = new Dictionary<int, (string Anomaly, string Normal)>();
+            if (containOnlyInFakeHumanCase && !fakeHuman)
+            {
+                return result;
+            }
+
+            if (containmentHostKeywords == null
+                || containmentClueIdsAnomaly == null
+                || containmentClueIdsNormal == null)
+            {
+                return result;
+            }
+
+            var pairCount = Mathf.Min(
+                containmentHostKeywords.Length,
+                Mathf.Min(containmentClueIdsAnomaly.Length, containmentClueIdsNormal.Length));
+
+            // 池子：谁的 id 里含关键词，谁就可能是收容物产地 ✓（一件家具最多挂一件 ✓）。
+            // 每一处**成对**存两个 id ✓：异常版给伪人物品 ✓、正常版给正常收容物 ✓。
+            var pool = new List<(int Index, string Anomaly, string Normal)>();
+            for (var i = 0; i < targets.Count; i++)
+            {
+                var interactable = targets[i].Interactable;
+                var id = interactable != null ? interactable.InteractableId : string.Empty;
+                if (string.IsNullOrEmpty(id))
+                {
+                    continue;
+                }
+
+                for (var k = 0; k < pairCount; k++)
+                {
+                    var keyword = containmentHostKeywords[k];
+                    if (!string.IsNullOrEmpty(keyword) && id.IndexOf(keyword, System.StringComparison.Ordinal) >= 0)
+                    {
+                        pool.Add((i, containmentClueIdsAnomaly[k], containmentClueIdsNormal[k]));
+                        break;
+                    }
+                }
+            }
+
+            if (pool.Count == 0)
+            {
+                Debug.LogWarning("[Case] 收容物池子是空的 ✗ —— 检查 containmentHostKeywords 有没有对得上家具 id ✓。");
+                return result;
+            }
+
+            var upper = Mathf.Clamp(maxContainmentClues, 0, pool.Count);
+            var lower = Mathf.Clamp(minContainmentClues, 0, upper);
+            var want = rng.Next(lower, upper + 1);
+            if (want <= 0)
+            {
+                return result;
+            }
+
+            var order = BuildShuffledOrder(pool.Count, rng);
+            var picked = new List<int>();
+
+            // 第一轮：异常家具优先 ✓
+            foreach (var oi in order)
+            {
+                if (picked.Count >= want)
+                {
+                    break;
+                }
+
+                if (anomalies.Contains(pool[oi].Index))
+                {
+                    picked.Add(oi);
+                }
+            }
+
+            // 第二轮：还不够就按洗牌顺序补 ✓ —— 不然"异常正好没落在池子里"就会一件都不出 ✗。
+            foreach (var oi in order)
+            {
+                if (picked.Count >= want)
+                {
+                    break;
+                }
+
+                if (!picked.Contains(oi))
+                {
+                    picked.Add(oi);
+                }
+            }
+
+            foreach (var oi in picked)
+            {
+                result[pool[oi].Index] = (pool[oi].Anomaly, pool[oi].Normal);
+            }
+
+            if (logCase)
+            {
+                // 直接把"抽中了哪几件"写出来 ✓ —— 不然只有"1 处"这个数字 ✓，
+                // 玩家/你自己还得去猜该翻哪件家具 ✗（我们已经为这个绕了两轮 ✓）。
+                var hostNames = new List<string>();
+                foreach (var index in result.Keys)
+                {
+                    var interactable = targets[index].Interactable;
+                    hostNames.Add(interactable != null ? interactable.InteractableId : index.ToString());
+                }
+
+                Debug.Log($"[Case] 本局收容物产地 {result.Count} 处（种子 {seed}，异常 {anomalies.Count} 件，"
+                          + $"池子 {pool.Count} 处）：{string.Join(" / ", hostNames)}");
+            }
+
+            return result;
+        }
+
+        /// <summary>把某件家具变成收容物产地 ✓（id 由 <see cref="PickContainmentHosts"/> 按种子 + 异常与否挑好 ✓）。</summary>
+        private void AttachContainmentClue(SampleInteractableRule rule, CaseSpec spec, string clueId)
+        {
+            if (rule == null)
+            {
+                // 以前这里**静默**返回 ✗ —— 于是"产地 1 处、却没有任何一行产地"✗，
+                // 找起来要多绕两轮 ✓。失败就说出来 ✓。
+                Debug.LogWarning($"[Case] 收容物没挂上：{spec.DisplayName} 上没有 SampleInteractableRule ✗（{clueId}）");
+                return;
+            }
+
+            var clue = FindClueById(clueId);
+            if (clue == null)
+            {
+                // 找不到就说清楚 ✗：多半是 ItemId 拼错了，或者这件收容物没进 bootstrapper 的 knownItems ✓。
+                Debug.LogWarning($"[Case] 收容物产地「{spec.DisplayName}」找不到收容物 id「{clueId}」"
+                                 + "（检查 ClueItem 的 ItemId，以及它在不在 knownItems 里 ✓）。");
+                return;
+            }
+
+            rule.AttachClue(clue, clue.EvidenceId, true);
+
+            // 记进"本局产地表" ✓ —— 「收容」页靠它列出这一局能收什么 ✓（挂载失败的不记 ✓）。
+            clueSites.Add(new ClueSite(spec.DisplayName, clue.ItemId, clue.DisplayName));
+
+            if (logCase)
+            {
+                Debug.Log($"[Case] 收容物产地：{spec.DisplayName} → {clue.DisplayName}（{clue.ItemId}，进收容箱 ✓）");
+            }
+        }
+
+        /// <summary>强度够这个数就算"异常家具" ✓（§2 里"可以直接下结论"那道门槛 ✓）。</summary>
+        private const float AnomalyThreshold = 0.5f;
+
+        /// <summary>读数落"强"档的门槛 ✓（够硬 = 光靠它也能下结论 ✓）。</summary>
+        private const float StrongReadingThreshold = 0.66f;
+
+        /// <summary>读数落"弱"档的门槛 ✓（有点不对劲 ✓，需要旁证 ✓）。</summary>
+        private const float WeakReadingThreshold = 0.33f;
+
+        /// <summary>
+        /// 一件家具在本局的**一整套读数** ✓ —— **表里有几种读数就有几条** ✓
+        ///（现在 5 条 ✓ = 五把工具各一条 ✓，就是"我能不能用 5 件道具测同一件家具"✓：能 ✓）。
+        ///
+        /// 种类 ✓、工具 ✓、三档数值 ✓、三档文案 ✓ **全部来自 <see cref="ReadingKindTable"/>** ✓ ——
+        /// 以前是写死的 5 种 + 6 个 switch ✗（加一种读数要改 8 处 ✗），现在表里加一行就行 ✓。
+        ///
+        /// 落档 = **这件家具的异常强度 × 这条读数的敏感度** ✓（<see cref="ReadingKindDefinition.Sensitivity"/> ✓）：
+        /// 灵敏的（探测器 ✓）远处也能读到一点 ✓，迟钝的（工具包 ✓）非贴到源头拆不出东西 ✓ ——
+        /// "同一件家具上有的正常 ✓、有的异常 ✓"是**空间算出来**的 ✓，不是掷骰子掷出来的 ✓。
+        /// </summary>
+        /// 每档下面挂了几条候选 ✓，就能摇出几种结果 ✓（见 <see cref="ReadingVariant"/> ✓）——
+        /// **数值和措辞每局都不一样** ✓；固定下来的只有"档位"（= 语义 ✓）。
+        private SampleInteractableRule.ToolReading[] BuildReadings(CaseSpec spec, CaseRandom rng)
+        {
+            var definitions = Table.Kinds;
+            var result = new List<SampleInteractableRule.ToolReading>(definitions.Count);
+
+            for (var i = 0; i < definitions.Count; i++)
+            {
+                var definition = definitions[i];
+                if (definition.Kind == CaseReadingKind.None)
+                {
+                    continue;
+                }
+
+                // 敏感度是"这条读数多容易读到东西" ✓ —— 不接线（0）会让所有读数永远正常 ✗，所以兜个下限 ✓。
+                var reach = spec.AnomalyStrength * Mathf.Max(0.01f, definition.Sensitivity);
+
+                result.Add(BuildReading(spec, definition, StrengthOf(reach), rng));
+            }
+
+            return result.ToArray();
+        }
+
+        /// <summary>强度 → 档位 ✓（两道门槛照 §2 两张表 ✓）。</summary>
+        private static ReadingStrength StrengthOf(float strength)
+        {
+            if (strength >= StrongReadingThreshold)
+            {
+                return ReadingStrength.Strong;
+            }
+
+            return strength >= WeakReadingThreshold ? ReadingStrength.Weak : ReadingStrength.Normal;
+        }
+
+        /// <summary>
+        /// 拼一条读数 ✓：工具 ✓ + 观测值 ✓ + 文案 ✓ + **它自己落哪一档** ✓ —— 内容全部查表 ✓。
+        ///
+        /// **随机就发生在这一步** ✓：这一档下面有几种候选 ✓ 就能摇出几种结果 ✓ ——
+        /// 先**挑一条候选** ✓ → 在它自己的 `[Min, Max]` 里**摇一个数** ✓ → 把数写进那条文案的 `{0}` ✓。
+        /// 于是"温度枪：-3.2℃"和"温度枪：-7.8℃，探头刚放上去读数就往下掉。"都可能出现 ✓，
+        /// 而**档位语义不动** ✓（强档就是明显偏低 ✓、弱档就是需要旁证 ✓）。
+        ///
+        /// 文案优先级 ✓：候选里摇出来的那句 ✓ → **家具覆盖表**里这件家具的专属文案 ✓（也支持 `{0}` ✓）。
+        /// </summary>
+        private SampleInteractableRule.ToolReading BuildReading(
+            CaseSpec spec, ReadingKindDefinition definition, ReadingStrength strength, CaseRandom rng)
+        {
+            var kind = definition.Kind;
+
+            var variant = definition.Pick(strength, rng);
+            var value = variant.Roll(rng);
+            var valueText = definition.FormatNumber(value);
+
+            var reading = new SampleInteractableRule.ToolReading
+            {
+                Tool = definition.Tool,
+                ToolDisplayName = definition.DisplayName,
+                Kind = kind,
+                IsAnomaly = strength != ReadingStrength.Normal,
+
+                // 两个数值字段都填同一个数 ✓ —— 只有 Kind 对应的那一个会被读走 ✓
+                //（观测位由 Kind 决定 ✓，见 SampleInteractableRule.RegisterObservation ✓）。
+                Temperature = value,
+                Emf = Mathf.RoundToInt(value),
+                Uv = variant.Flag,
+                Audio = variant.Audio,
+                Text = variant.BuildText(valueText),
+            };
+
+            if (Table.TryGetOverrideText(spec.InteractableId, kind, strength, valueText, out var overrideText))
+            {
+                reading.Text = overrideText;
+            }
+
+            return reading;
+        }
+
+        /// <summary>
+        private static readonly Dictionary<int, Vector2> CenterCache = new Dictionary<int, Vector2>();
+
+        /// <summary>
+        /// 这件家具在房间里的**中心** ✓（画布像素坐标 ✓）。
+        ///
+        /// ⚠ **这个函数栽过三次** ✗，记清楚免得第四次：
+        ///  ① `transform.position` ✗；② `rect.center` ✗ —— 两者都量成画布中心 `(361, 256)` ✓，
+        ///     因为交互物的根节点是**拉伸的全屏容器** ✓；
+        ///  ③ **每张图尺寸完全一样、而且是透明底** ✓ —— 家具只占图里的一小块 ✓，
+        ///     所以"矩形中心"根本不代表"家具在哪儿"✗ —— **必须看像素** ✓。
+        ///
+        /// 现在：取贴图的 **alpha 重心** ✓（透明处权重 0 ✓ → 出来的就是那件家具自己 ✓），
+        /// 纹理像素 → Image 本地矩形 → 世界坐标 ✓。
+        /// **贴图必须勾 Read/Write** ✓（否则 `GetPixels32` 会抛 ✗ → 这里退化成矩形中心 ✓ 并打一次警告 ✓）。
+        /// </summary>
+        private static Vector2 WorldCenter(SimpleInteractable interactable)
+        {
+            var id = interactable.GetInstanceID();
+            if (CenterCache.TryGetValue(id, out var cached))
+            {
+                return cached;
+            }
+
+            var graphics = interactable.GetComponentsInChildren<UnityEngine.UI.Graphic>(true);
+            var sum = Vector2.zero;
+            var count = 0;
+
+            for (var i = 0; i < graphics.Length; i++)
+            {
+                var image = graphics[i] as UnityEngine.UI.Image;
+                if (image == null || image.sprite == null)
+                {
+                    continue;
+                }
+
+                sum += SpriteAlphaCenter(image);
+                count++;
+            }
+
+            var result = count > 0 ? sum / count : FallbackCenter(interactable);
+
+            CenterCache[id] = result;
+            return result;
+        }
+
+        /// <summary>贴图的 **alpha 重心** → 世界坐标 ✓（透明底不算 ✓，拿到的是家具自己 ✓）。</summary>
+        private static Vector2 SpriteAlphaCenter(UnityEngine.UI.Image image)
+        {
+            var rect = image.rectTransform;
+            var sprite = image.sprite;
+            var texture = sprite != null ? sprite.texture : null;
+
+            if (texture == null || !texture.isReadable)
+            {
+                WarnUnreadableOnce(texture);
+                return rect.TransformPoint(rect.rect.center);
+            }
+
+            var spriteRect = sprite.textureRect;
+            var sourceWidth = Mathf.Max(1, Mathf.RoundToInt(spriteRect.width));
+            var sourceHeight = Mathf.Max(1, Mathf.RoundToInt(spriteRect.height));
+
+            // **降采样** ✓：512 的图按 4 像素一格 ✓ —— 重心不需要像素级精度 ✓，但快几十倍 ✓。
+            var step = Mathf.Max(1, Mathf.RoundToInt(Mathf.Max(sourceWidth, sourceHeight) / 96f));
+
+            var pixels = texture.GetPixels32();
+            var texWidth = texture.width;
+            var texHeight = texture.height;
+            var originX = Mathf.RoundToInt(spriteRect.x);
+            var originY = Mathf.RoundToInt(spriteRect.y);
+
+            double sumX = 0;
+            double sumY = 0;
+            double weight = 0;
+
+            for (var y = 0; y < sourceHeight; y += step)
+            {
+                var py = originY + y;
+                if (py < 0 || py >= texHeight)
+                {
+                    continue;
+                }
+
+                for (var x = 0; x < sourceWidth; x += step)
+                {
+                    var px = originX + x;
+                    if (px < 0 || px >= texWidth)
+                    {
+                        continue;
+                    }
+
+                    // **只看 alpha** ✓：透明底那些像素权重 0 ✓ —— 这就是本轮问题的根因 ✓。
+                    var alpha = pixels[(py * texWidth) + px].a / 255f;
+                    if (alpha <= 0.05f)
+                    {
+                        continue;
+                    }
+
+                    sumX += px * alpha;
+                    sumY += py * alpha;
+                    weight += alpha;
+                }
+            }
+
+            if (weight <= 0)
+            {
+                return rect.TransformPoint(rect.rect.center);
+            }
+
+            // 纹理像素坐标 → Image 本地矩形坐标 ✓（纹理 y 向上 ✓，sprite 不翻转时一致 ✓）→ 世界 ✓。
+            var centerX = (float)(sumX / weight);
+            var centerY = (float)(sumY / weight);
+
+            var local = new Vector2(
+                rect.rect.xMin + (((centerX - spriteRect.x) / spriteRect.width) * rect.rect.width),
+                rect.rect.yMin + (((centerY - spriteRect.y) / spriteRect.height) * rect.rect.height));
+
+            return rect.TransformPoint(local);
+        }
+
+        private static bool warnedUnreadable;
+
+        private static void WarnUnreadableOnce(Texture texture)
+        {
+            if (warnedUnreadable)
+            {
+                return;
+            }
+
+            warnedUnreadable = true;
+            Debug.LogWarning("[Case] 有家具贴图**不可读** ✗ —— 位置只能退化成矩形中心 ✓（那样衰减没意义 ✗）。"
+                             + "请在贴图 Import Settings 里勾上 **Read/Write** ✓。"
+                             + $"（第一张：{(texture != null ? texture.name : "空")}）");
+        }
+
+        /// <summary>一个带 sprite 的 Image 都没有时的兜底 ✓（纯透明热区那种 ✗）。</summary>
+        private static Vector2 FallbackCenter(SimpleInteractable interactable)
+        {
+            var self = interactable.transform as RectTransform;
+            return self != null ? self.TransformPoint(self.rect.center) : (Vector2)interactable.transform.position;
+        }
+
+        /// <summary>
+        /// 挑本局的**主场** ✓（可以有 1~<see cref="maxOrigins"/> 个 ✓）：
+        /// **调试字段填了就强制用填的那几件** ✓ —— 想复现"两个源离得很远"这种布局就用它 ✓；
+        /// 没填就按种子抽 ✓（**各不相同** ✓）。
+        /// </summary>
+        private List<int> PickOrigins(IReadOnlyList<Target> targets, CaseRandom rng)
+        {
+            var result = new List<int>();
+
+            if (debugForceOrigins != null && debugForceOrigins.Length > 0)
+            {
+                for (var i = 0; i < targets.Count; i++)
+                {
+                    var id = targets[i].Interactable.InteractableId;
+
+                    for (var k = 0; k < debugForceOrigins.Length; k++)
+                    {
+                        var keyword = debugForceOrigins[k];
+                        if (!string.IsNullOrEmpty(keyword) && id.IndexOf(keyword, StringComparison.Ordinal) >= 0)
+                        {
+                            result.Add(i);
+                            break;
+                        }
+                    }
+                }
+
+                if (result.Count > 0)
+                {
+                    Debug.Log("[Case] 主场由**调试字段**强制指定 ✓："
+                              + string.Join(" / ", result.ConvertAll(index => targets[index].Interactable.InteractableId))
+                              + "（清空 debugForceOrigins 才会按种子抽 ✓）");
+                    return result;
+                }
+
+                Debug.LogWarning("[Case] debugForceOrigins 里没有一个关键词匹配上家具 id ✗ —— 这次仍然按种子抽 ✓。");
+            }
+
+            var wanted = Mathf.Clamp(rng.Next(1, Mathf.Max(1, maxOrigins) + 1), 1, targets.Count);
+            var order = BuildShuffledOrder(targets.Count, rng);
+
+            for (var i = 0; i < wanted && i < order.Count; i++)
+            {
+                result.Add(order[i]);
+            }
+
+            return result;
+        }
+
+        /// 把"离主场多远"折成**强度** ✓：主场自己 = 1 ✓，越远越低 ✓，超出半径就是 0 ✓。
+        /// 再按种子给每件家具一点**抖动** ✓ —— 不然强度会是一圈圈规整的同心圆 ✗（一眼看穿 ✗）。
+        /// </summary>
+        private void ApplyAnomalyStrengths(
+            IReadOnlyList<Target> targets, IReadOnlyList<int> origins, float[] strengths, CaseRandom rng)
+        {
+            var radius = ResolveDecayRadius(targets);
+
+            for (var i = 0; i < targets.Count; i++)
+            {
+                var center = WorldCenter(targets[i].Interactable);
+
+                // **主场就是 1.00，不抖** ✓ —— 抖动只用来打散"同距的几件" ✗，
+                // 抖到主场头上会让日志里的 `★主场 0.89` ✗ 看着像没算对 ✓。
+                if (IsOrigin(origins, i))
+                {
+                    strengths[i] = 1f;
+                    continue;
+                }
+
+                // **取所有主场里最强的那一个** ✓：两个源的场叠在一起时 ✓，
+                // 玩家读到的是"更近的那个源头"的读数 ✓（而不是两边加起来爆表 ✗）。
+                var best = 0f;
+                for (var o = 0; o < origins.Count; o++)
+                {
+                    var distance = Vector2.Distance(WorldCenter(targets[origins[o]].Interactable), center);
+                    best = Mathf.Max(best, Mathf.Clamp01(1f - distance / radius));
+                }
+
+                // 抖动 ✓：同距的两件家具强度也会不一样 ✓（否则玩家拿尺子量距离就能反推 ✓）。
+                // **乘在强度上** ✓（不是加 ✗）：远处那几件本来就在 0 附近 ✓，
+                // 加一个固定值等于把它们整体抬起来 ✗ —— 实测出现过"最远两件 0.00 ✗、中间一件 0.05 ✗"
+                // 这种根本不像梯度的分布 ✓，就是"加抖动 + 半径取一半"两件事叠出来的 ✓。
+                var jitter = (float)((rng.NextDouble() * 2.0) - 1.0) * anomalyJitter;
+
+                strengths[i] = Mathf.Clamp01(best * (1f + jitter));
+            }
+        }
+
+        /// <summary>
+        /// 衰减半径 ✓：手填了就用 ✓；**留 0 就按房间自己算** ✓。
+        ///
+        /// 自动值 = **离得最远那两件家具之间的真实距离** ✓（整个房间的跨度 ✓）——
+        /// 于是主场 = 1.00 ✓、房间另一头 ≈ 0 ✓、中间大致 0.5 ✓，梯度铺满整个房间 ✓。
+        ///
+        /// ⚠ 这里踩过两个坑 ✗：① 系数取过一半 ✗（拍脑袋定的 ✓，结果只有紧贴主场的两件过门槛 ✗）；
+        /// ② **`targets[j]` 那半边漏改了** ✗ —— 拿"真实中心"去和"画布中心 `(361,256)`"比距离 ✗，
+        /// 算出来的半径和家具布局毫无关系 ✓（实测 ≈130 像素 ✗）。
+        /// 以后改 `WorldCenter` 的取法时，**两个下标都要改** ✓。
+        /// </summary>
+        private float ResolveDecayRadius(IReadOnlyList<Target> targets)
+        {
+            if (anomalyDecayRadius > 0f || targets.Count < 2)
+            {
+                return anomalyDecayRadius > 0f ? anomalyDecayRadius : 1f;
+            }
+
+            var maxDistance = 0f;
+            for (var i = 0; i < targets.Count; i++)
+            {
+                for (var j = i + 1; j < targets.Count; j++)
+                {
+                    maxDistance = Mathf.Max(maxDistance, Vector2.Distance(
+                        WorldCenter(targets[i].Interactable),
+                        WorldCenter(targets[j].Interactable)));
+                }
+            }
+
+            return Mathf.Max(1f, maxDistance);
+        }
+
+        /// <summary>
+        /// **诱饵** ✓：从"离主场最近"的几件里挑 1~2 件 ✓，把强度**清零** ✓ —— 它离源头近 ✓，
+        /// 读数却比远处还干净 ✓（"近 = 有问题"这个直觉会被故意打脸 ✓）。
+        ///
+        /// 而且有几率**不出现** ✓：否则"每局都有一个近处诱饵"本身又变成规律了 ✗。
+        /// </summary>
+        private void PickDecoys(
+            IReadOnlyList<Target> targets, IReadOnlyList<int> origins, float[] strengths, HashSet<int> decoySet, CaseRandom rng)
+        {
+            if (maxDecoys <= 0 || targets.Count < 3 || rng.NextDouble() > decoyChance)
+            {
+                return;
+            }
+
+            var order = BuildOrderByDistanceTo(targets, origins);
+            var wanted = rng.Next(1, maxDecoys + 1);
+
+            for (var i = 0; i < order.Count && decoySet.Count < wanted; i++)
+            {
+                var index = order[i];
+                if (IsOrigin(origins, index))
+                {
+                    continue; // 主场自己不能当诱饵 ✗
+                }
+
+                strengths[index] = 0f;
+                decoySet.Add(index);
+            }
+        }
+
+        /// <summary>按"离**最近的那个主场**从近到远"排 ✓（诱饵就从最近那几件里挑 ✓）。</summary>
+        private static List<int> BuildOrderByDistanceTo(IReadOnlyList<Target> targets, IReadOnlyList<int> origins)
+        {
+            var order = new List<int>(targets.Count);
+
+            for (var i = 0; i < targets.Count; i++)
+            {
+                order.Add(i);
+            }
+
+            order.Sort((a, b) => DistanceToOrigins(targets, origins, a)
+                .CompareTo(DistanceToOrigins(targets, origins, b)));
+
+            return order;
+        }
+
+        /// <summary>
+        /// 这个下标是不是主场之一 ✓。
+        /// **不用 `origins.Contains`** ✗：`IReadOnlyList<int>` 没有这个方法 ✓，
+        /// 而这个文件没引 `System.Linq` ✓（一直靠 `List` 自带的方法 ✓），
+        /// 硬写会掉进 `MemoryExtensions.Contains` 那个 span 重载 ✗ → CS7036 ✓。
+        /// </summary>
+        private static bool IsOrigin(IReadOnlyList<int> origins, int index)
+        {
+            for (var i = 0; i < origins.Count; i++)
+            {
+                if (origins[i] == index)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>到**最近那个主场**的距离 ✓（多主场时按最近的算 ✓）。</summary>
+        private static float DistanceToOrigins(IReadOnlyList<Target> targets, IReadOnlyList<int> origins, int index)
+        {
+            var center = WorldCenter(targets[index].Interactable);
+            var best = float.MaxValue;
+
+            for (var o = 0; o < origins.Count; o++)
+            {
+                best = Mathf.Min(best, Vector2.Distance(WorldCenter(targets[origins[o]].Interactable), center));
+            }
+
+            return best == float.MaxValue ? 0f : best;
+        }
+
+
+        /// <summary>
+        /// 从 <see cref="InventoryManager"/> 的全局 Item 表里按 id 找收容物 ✓ ——
+        /// 这样建造工具不用再往 CaseDirector 上连一遍收容物引用 ✓（少一处会漏连的地方 ✓）。
+        /// </summary>
+        private static Project.Gameplay.Scripts.Items.ClueItem FindClueById(string itemId)
+        {
+            if (string.IsNullOrEmpty(itemId) || !Services.TryGet<InventoryManager>(out var inventory))
+            {
+                return null;
+            }
+
+            var source = inventory.ItemSource;
+            if (source == null)
+            {
+                return null;
+            }
+
+            foreach (var item in source)
+            {
+                if (item is Project.Gameplay.Scripts.Items.ClueItem clue && clue.ItemId == itemId)
+                {
+                    return clue;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 规则读出一条读数后叫它 ✓：**每条读数都记账** ✓（这件家具读了几条 ✓、其中几条异常 ✓）。
+        ///
+        /// 但**证据仍按"一处产地算一条"** ✓（<see cref="CaseSpec.Read"/> ✓）：拿五把工具把同一件家具读穿 ✓
+        /// 不会把判定门槛灌水 ✗，只会让你**更确定**✓ —— 这正是"多份读数互相印证"的意思 ✓。
+        /// </summary>
+        public void NotifyRead(string interactableId, bool readingIsAnomaly = false, string toolName = null, string text = null)
         {
             if (submitted || string.IsNullOrEmpty(interactableId))
             {
                 return;
             }
 
-            if (!specs.TryGetValue(interactableId, out var spec) || spec.Read)
+            if (!specs.TryGetValue(interactableId, out var spec))
             {
                 return;
             }
 
-            spec.Read = true;
-            specs[interactableId] = spec;
-            readOrder.Add(interactableId);
+            // 读数账本 ✓：每条都记 ✓（同一把工具反复读就反复记 ✓，没有任何副作用 ✓）。
+            spec.ReadingsTaken++;
+            if (readingIsAnomaly)
+            {
+                spec.AnomalousReadings++;
+            }
 
-            if (spec.IsAnomaly)
+            var firstRead = !spec.Read;
+            if (firstRead)
+            {
+                spec.Read = true;
+                readOrder.Add(interactableId);
+            }
+
+            specs[interactableId] = spec; // CaseSpec 是结构体 ✓：改完必须写回 ✓
+
+            if (firstRead && spec.IsAnomaly)
             {
                 foundAnomalies++;
 
@@ -381,8 +1259,13 @@ namespace Project.Gameplay.Scripts.Case
 
             if (logCase)
             {
-                Debug.Log($"[Case] 读到观测：{interactableId}（{spec.Kind}，异常={spec.IsAnomaly}）"
-                          + $"→ 异常 {foundAnomalies}/{corroborationNeeded}，已读 {readOrder.Count} 件");
+                var readingLine = string.IsNullOrEmpty(toolName)
+                    ? string.Empty
+                    : $" ← {toolName}「{text}」（{(readingIsAnomaly ? "异常" : "正常")}）";
+
+                Debug.Log($"[Case] 读数：{spec.DisplayName}{readingLine}"
+                          + $"；这件已读 {spec.ReadingsTaken} 条（异常 {spec.AnomalousReadings} 条）"
+                          + $" → 证据 {foundAnomalies}/{corroborationNeeded}，已读产地 {readOrder.Count} 处");
             }
         }
 

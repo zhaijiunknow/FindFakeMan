@@ -32,12 +32,26 @@ namespace Project.Gameplay.Editor
         private const string ItemFolder = "Assets/Project/Gameplay/ScriptableObjects/Items";
         private const int Size = 128;
 
-        /// <summary>要生成图标的线索资产名（和 ScriptableObjects/Items 下的文件名一致）。</summary>
+        /// <summary>
+        /// 要生成图标的线索资产名（和 ScriptableObjects/Items 下的文件名一致）。
+        ///
+        /// 约定：**同一件东西的异常版 / 正常版画同一个形状** ✓，但正常版走中性灰 ✓、异常版走主题色 ✓ ——
+        /// 这样玩家瞄一眼收容格就知道"这件是不是伪人物品"✓；异常的具体内容由**描述**讲 ✓（图标里不画叉 ✗）。
+        /// </summary>
         private static readonly string[] ClueAssetNames =
         {
             "Clue_WaterStain",
+            "Clue_WaterStain_Normal",
             "Clue_SofaHair",
+            "Clue_SofaHair_Normal",
             "Clue_DrawerRecord",
+            "Clue_DrawerRecord_Normal",
+            "Clue_GroupPhoto",
+            "Clue_GroupPhoto_Normal",
+            "Clue_CeilingPrint",
+            "Clue_CeilingPrint_Normal",
+            "Clue_GlassVial",
+            "Clue_GlassVial_Normal",
         };
 
         /// <summary>柔光宽度（比线宽多出来的那一圈）。</summary>
@@ -56,6 +70,10 @@ namespace Project.Gameplay.Editor
         private static readonly Color HairColor = new Color(0.95f, 0.86f, 0.72f, 1f);
         private static readonly Color PaperColor = new Color(0.93f, 0.91f, 0.82f, 1f);
         private static readonly Color PaperDimColor = new Color(0.93f, 0.91f, 0.82f, 0.45f);
+
+        // 正常版收容物用中性灰 ✓：形状和异常版一样 ✓，一眼看不出"有颜色" = 这件没异常 ✓。
+        private static readonly Color NormalColor = new Color(0.78f, 0.84f, 0.9f, 1f);
+        private static readonly Color NormalDimColor = new Color(0.78f, 0.84f, 0.9f, 0.4f);
 
         [MenuItem("Tools/Project/Gameplay/Generate Item Icons")]
         public static void GenerateAll()
@@ -239,15 +257,54 @@ namespace Project.Gameplay.Editor
             var pixels = NewCanvas();
             switch (clueAssetName)
             {
+                // ---- 水渍（地毯边那片痕迹）----
                 case "Clue_WaterStain":
-                    DrawClueWaterStain(pixels);
+                    DrawClueWaterStain(pixels, StainColor, StainDimColor);
                     break;
+                case "Clue_WaterStain_Normal":
+                    DrawClueWaterStain(pixels, NormalColor, NormalDimColor);
+                    break;
+
+                // ---- 沙发夹层里的头发 ----
                 case "Clue_SofaHair":
-                    DrawClueSofaHair(pixels);
+                    DrawClueSofaHair(pixels, HairColor, HairColor);
                     break;
+                case "Clue_SofaHair_Normal":
+                    DrawClueSofaHair(pixels, NormalColor, NormalDimColor);
+                    break;
+
+                // ---- 木桌抽屉里的记录 ----
                 case "Clue_DrawerRecord":
-                    DrawClueDrawerRecord(pixels);
+                    DrawClueDrawerRecord(pixels, PaperColor, PaperDimColor, StainColor);
                     break;
+                case "Clue_DrawerRecord_Normal":
+                    DrawClueDrawerRecord(pixels, NormalColor, NormalDimColor, NormalDimColor);
+                    break;
+
+                // ---- 茶几抽屉里的团建合影（客厅 · 交互点 1）----
+                case "Clue_GroupPhoto":
+                    DrawClueGroupPhoto(pixels, PaperColor, StainColor);
+                    break;
+                case "Clue_GroupPhoto_Normal":
+                    DrawClueGroupPhoto(pixels, NormalColor, NormalDimColor);
+                    break;
+
+                // ---- 天花板上的手印（客厅 · 交互点 2）----
+                case "Clue_CeilingPrint":
+                    DrawClueCeilingPrint(pixels, StainColor, StainDimColor);
+                    break;
+                case "Clue_CeilingPrint_Normal":
+                    DrawClueCeilingPrint(pixels, NormalColor, NormalDimColor);
+                    break;
+
+                // ---- 书架底层的密封玻璃瓶（客厅 · 交互点 3）----
+                case "Clue_GlassVial":
+                    DrawClueGlassVial(pixels, StainColor, StainDimColor);
+                    break;
+                case "Clue_GlassVial_Normal":
+                    DrawClueGlassVial(pixels, NormalColor, NormalDimColor);
+                    break;
+
                 default:
                     return null;
             }
@@ -260,8 +317,17 @@ namespace Project.Gameplay.Editor
             switch (clueAssetName)
             {
                 case "Clue_WaterStain": return "Icon_Clue_WaterStain";
+                case "Clue_WaterStain_Normal": return "Icon_Clue_WaterStain_Normal";
                 case "Clue_SofaHair": return "Icon_Clue_SofaHair";
+                case "Clue_SofaHair_Normal": return "Icon_Clue_SofaHair_Normal";
                 case "Clue_DrawerRecord": return "Icon_Clue_DrawerRecord";
+                case "Clue_DrawerRecord_Normal": return "Icon_Clue_DrawerRecord_Normal";
+                case "Clue_GroupPhoto": return "Icon_Clue_GroupPhoto";
+                case "Clue_GroupPhoto_Normal": return "Icon_Clue_GroupPhoto_Normal";
+                case "Clue_CeilingPrint": return "Icon_Clue_CeilingPrint";
+                case "Clue_CeilingPrint_Normal": return "Icon_Clue_CeilingPrint_Normal";
+                case "Clue_GlassVial": return "Icon_Clue_GlassVial";
+                case "Clue_GlassVial_Normal": return "Icon_Clue_GlassVial_Normal";
                 default: return null;
             }
         }
@@ -360,43 +426,80 @@ namespace Project.Gameplay.Editor
         // ---------- 三个线索图形（各用主题色，和工具的浅青白区分开）----------
 
         /// <summary>荧光水渍：一滩不规则的渍 + 内圈 + 两滴飞溅（紫外线下那种冷绿）。</summary>
-        private static void DrawClueWaterStain(Color32[] px)
+        private static void DrawClueWaterStain(Color32[] px, Color main, Color dim)
         {
-            StrokeClosedPolyline(px, BlobPoints(new Vector2(58f, 54f), 30f, 0.16f, 0.6f), 4.5f, StainColor);
-            StrokeClosedPolyline(px, BlobPoints(new Vector2(58f, 54f), 18f, 0.22f, 2.1f), 3f, StainDimColor);
+            StrokeClosedPolyline(px, BlobPoints(new Vector2(58f, 54f), 30f, 0.16f, 0.6f), 4.5f, main);
+            StrokeClosedPolyline(px, BlobPoints(new Vector2(58f, 54f), 18f, 0.22f, 2.1f), 3f, dim);
 
             // 飞溅：一小滴 + 一道短痕（"擦过/淌过"的痕迹）
-            StrokeCircleGlow(px, new Vector2(100f, 40f), 6f, 3.5f, StainColor);
-            StrokeSegmentGlow(px, new Vector2(88f, 84f), new Vector2(98f, 92f), 3.5f, StainDimColor);
+            StrokeCircleGlow(px, new Vector2(100f, 40f), 6f, 3.5f, main);
+            StrokeSegmentGlow(px, new Vector2(88f, 84f), new Vector2(98f, 92f), 3.5f, dim);
         }
 
         /// <summary>坐垫夹层的头发：三缕不同心的弧 + 两端翘出去的碎发。</summary>
-        private static void DrawClueSofaHair(Color32[] px)
+        private static void DrawClueSofaHair(Color32[] px, Color main, Color dim)
         {
-            StrokeArcGlow(px, new Vector2(58f, 24f), 54f, 28f, 152f, 4.5f, HairColor);
-            StrokeArcGlow(px, new Vector2(68f, 34f), 44f, 22f, 158f, 4f, HairColor);
-            StrokeArcGlow(px, new Vector2(64f, 16f), 62f, 38f, 142f, 3.5f, HairColor);
+            StrokeArcGlow(px, new Vector2(58f, 24f), 54f, 28f, 152f, 4.5f, main);
+            StrokeArcGlow(px, new Vector2(68f, 34f), 44f, 22f, 158f, 4f, main);
+            StrokeArcGlow(px, new Vector2(64f, 16f), 62f, 38f, 142f, 3.5f, dim);
 
             // 碎发：从主弧两端翘出去的两小段（不然三缕弧看着像信号图标，不像头发）
-            StrokeSegmentGlow(px, new Vector2(30f, 52f), new Vector2(18f, 64f), 3f, HairColor);
-            StrokeSegmentGlow(px, new Vector2(106f, 52f), new Vector2(118f, 66f), 3f, HairColor);
+            StrokeSegmentGlow(px, new Vector2(30f, 52f), new Vector2(18f, 64f), 3f, main);
+            StrokeSegmentGlow(px, new Vector2(106f, 52f), new Vector2(118f, 66f), 3f, main);
         }
 
         /// <summary>抽屉里的记录：一页纸 + 几行字，其中一行开始"变形"（对得上设计里"字迹突然变形"）。</summary>
-        private static void DrawClueDrawerRecord(Color32[] px)
+        private static void DrawClueDrawerRecord(Color32[] px, Color main, Color dim, Color odd)
         {
-            StrokeRoundedRectGlow(px, new Rect(34f, 24f, 60f, 78f), 6f, 4.5f, PaperColor);
+            StrokeRoundedRectGlow(px, new Rect(34f, 24f, 60f, 78f), 6f, 4.5f, main);
 
-            StrokeSegment(px, new Vector2(44f, 84f), new Vector2(84f, 84f), 3.5f, PaperDimColor);
-            StrokeSegment(px, new Vector2(44f, 73f), new Vector2(84f, 73f), 3.5f, PaperDimColor);
-            StrokeSegment(px, new Vector2(44f, 62f), new Vector2(70f, 62f), 3.5f, PaperDimColor);
+            StrokeSegment(px, new Vector2(44f, 84f), new Vector2(84f, 84f), 3.5f, dim);
+            StrokeSegment(px, new Vector2(44f, 73f), new Vector2(84f, 73f), 3.5f, dim);
+            StrokeSegment(px, new Vector2(44f, 62f), new Vector2(70f, 62f), 3.5f, dim);
 
             // 第四行扭掉：三段不在一条线上的笔画，中间那段泛着冷光（异常的那一笔）
-            StrokeSegment(px, new Vector2(44f, 49f), new Vector2(56f, 53f), 3.5f, PaperDimColor);
-            StrokeSegment(px, new Vector2(56f, 53f), new Vector2(68f, 46f), 3.5f, StainColor);
-            StrokeSegment(px, new Vector2(68f, 46f), new Vector2(84f, 50f), 3.5f, PaperDimColor);
+            StrokeSegment(px, new Vector2(44f, 49f), new Vector2(56f, 53f), 3.5f, dim);
+            StrokeSegment(px, new Vector2(56f, 53f), new Vector2(68f, 46f), 3.5f, odd);
+            StrokeSegment(px, new Vector2(68f, 46f), new Vector2(84f, 50f), 3.5f, dim);
 
-            StrokeSegment(px, new Vector2(44f, 35f), new Vector2(62f, 35f), 3.5f, PaperDimColor);
+            StrokeSegment(px, new Vector2(44f, 35f), new Vector2(62f, 35f), 3.5f, dim);
+        }
+
+        /// <summary>团建合影：相框 + 一排人头（异常版"脸上有红叉"由描述讲 ✓，图标不画叉 ✗）。</summary>
+        private static void DrawClueGroupPhoto(Color32[] px, Color main, Color dim)
+        {
+            StrokeRoundedRectGlow(px, new Rect(18f, 30f, 92f, 68f), 6f, 4.5f, main);
+            StrokeSegment(px, new Vector2(26f, 44f), new Vector2(102f, 44f), 3f, dim);
+
+            for (var i = 0; i < 7; i++)
+            {
+                var x = 32f + i * 11f;
+                FillCircle(px, new Vector2(x, 74f), 4.5f, main);
+                StrokeSegment(px, new Vector2(x, 64f), new Vector2(x, 52f), 3f, dim);
+            }
+        }
+
+        /// <summary>天花板上的手印：掌 + 四指（大拇指用暗色，免得五根一样长像插头 =_=）。</summary>
+        private static void DrawClueCeilingPrint(Color32[] px, Color main, Color dim)
+        {
+            StrokeCircleGlow(px, new Vector2(62f, 56f), 20f, 4.5f, main);
+            StrokeSegmentGlow(px, new Vector2(50f, 74f), new Vector2(44f, 96f), 4f, main);
+            StrokeSegmentGlow(px, new Vector2(60f, 78f), new Vector2(58f, 102f), 4f, main);
+            StrokeSegmentGlow(px, new Vector2(70f, 78f), new Vector2(72f, 101f), 4f, main);
+            StrokeSegmentGlow(px, new Vector2(79f, 73f), new Vector2(85f, 93f), 4f, main);
+            StrokeArcGlow(px, new Vector2(34f, 50f), 13f, 13f, 210f, 4f, dim);
+        }
+
+        /// <summary>密封玻璃瓶：瓶身 + 颈 + 塞子 + 几道霜花（结冰那版由描述讲 ✓）。</summary>
+        private static void DrawClueGlassVial(Color32[] px, Color main, Color dim)
+        {
+            StrokeRoundedRectGlow(px, new Rect(34f, 22f, 60f, 62f), 14f, 4.5f, main);
+            StrokeRoundedRect(px, new Rect(52f, 82f, 24f, 16f), 4f, 3.5f, dim);
+            FillRoundedRect(px, new Rect(56f, 96f, 16f, 8f), 2.5f, main);
+
+            StrokeSegment(px, new Vector2(44f, 40f), new Vector2(84f, 40f), 3f, dim);
+            StrokeSegment(px, new Vector2(46f, 62f), new Vector2(58f, 72f), 3f, dim);
+            StrokeSegment(px, new Vector2(84f, 52f), new Vector2(70f, 64f), 3f, dim);
         }
 
         // ---------- 描边 / 填充（SDF + 覆盖率抗锯齿）----------

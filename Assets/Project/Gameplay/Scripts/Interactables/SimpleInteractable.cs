@@ -7,6 +7,9 @@ namespace Project.Gameplay.Scripts.Interactables
     {
         [SerializeField] private string interactableId;
         [SerializeField] private Item associatedItem;
+
+        // 运行时塞进来的"这里现在能拿走什么" ✓（通用关卡器用：案情开局才知道哪儿有收容物 ✓）。
+        private Item runtimeItem;
         [SerializeField] private bool isActive = true;
         [SerializeField] private bool isCollected;
 
@@ -25,7 +28,18 @@ namespace Project.Gameplay.Scripts.Interactables
         [SerializeField] [TextArea] private string anomalyDescription;
 
         public string InteractableId => interactableId;
-        public Item AssociatedItem => associatedItem;
+        /// <summary>
+        /// 这里"可以拿走的东西"（详情区显示它 ✓，方向体感的「拾取」也靠它 ✓）。
+        ///
+        /// 通用关卡器改造之后它通常是**运行时塞进来的** ✓：玩家用对口道具读过一次之后，
+        /// <see cref="SampleInteractableRule"/> 才把收容物塞进来 ✓（这就是"解锁拾取" ✓）。
+        /// 好处是**不需要新状态位** ✓：没读过 → 这里是 null → 体感上的「拾取」本来就用不了 ✓；
+        /// 场景里烘死的 <c>associatedItem</c> 只当兜底 ✓（旧内容 / 非通用关卡器的交互物 ✓）。
+        /// </summary>
+        public Item AssociatedItem => runtimeItem != null ? runtimeItem : associatedItem;
+
+        /// <summary>运行时换掉"可以拿走的东西" ✓。传 null = 这里现在没东西可拿 ✓（拿走或丢弃之后都调它 ✓）。</summary>
+        public void SetRuntimeItem(Item item) => runtimeItem = item;
         public bool IsActive => isActive;
         public bool IsCollected => isCollected;
 
@@ -57,10 +71,18 @@ namespace Project.Gameplay.Scripts.Interactables
             isZoomed = value;
         }
 
+        /// <summary>
+        /// 标记"这里已经被查过 / 已经拿走" ✓。
+        ///
+        /// ⚠️ **不再顺手把交互物关掉** ✗→✓：以前这里还写了 `isActive = false;` ✗ ——
+        /// 于是"读过一次"的家具立刻变得**点不动、也用不了工具** ✗（点击和用工具都要判 `IsActive` ✓），
+        /// 表现就是"交互一次之后家具就死了"✗、"收容物解锁之后再也选不中那件家具"✗。
+        /// "查过之后就不再能用"这种语义要由内容显式表达 ✓（规则的 `deactivateOnSuccess` ✓ 会去调 `SetActive(false)` ✓），
+        /// 不该偷偷塞在"已收集"这个标记里 ✗。
+        /// </summary>
         public void SetCollected()
         {
             isCollected = true;
-            isActive = false;
         }
 
         public void SetInteractionState(string state)

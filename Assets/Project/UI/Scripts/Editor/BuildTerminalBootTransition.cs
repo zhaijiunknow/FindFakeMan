@@ -338,8 +338,72 @@ namespace Project.UI.Editor
                 }
             }
 
+            // 顺手把雷达扫描也接上：序幕的雷达要真的在扫，才有"角度"可以交接给关卡 ✓。
+            WireRadar(mainUi);
+
             Debug.Log($"[Boot] MainUI 已接工具槽：槽位图标 {(icons[0] != null)}，工具资产 {found}/4"
                       + "（自检那一拍就会出现，全屏后仍在）。");
+        }
+
+        /// <summary>
+        /// 给序幕的 MainUI 接上雷达扫描：用**和关卡同一张**扇形贴图、**同一套** RadarEffects 参数，
+        /// 这样面板内 CRT 收屏 → 展开时，雷达看起来是同一次旋转没断过 ✓
+        /// （`ProloguePerformanceDirector` 在切场景前把角度记进交接单，关卡第一帧接着转 ✓）。
+        ///
+        /// 扇形挂在 `BigApp/leida` 下面：那个节点自带 `Mask`，会被裁进圆盘范围 ✓（和关卡里一样）。
+        /// </summary>
+        private static void WireRadar(RectTransform mainUi)
+        {
+            if (mainUi == null)
+            {
+                return;
+            }
+
+            var leida = mainUi.Find("BigApp/leida") as RectTransform;
+            if (leida == null)
+            {
+                Debug.LogWarning("[Boot] MainUI 里找不到 BigApp/leida，雷达扫描没接上。");
+                return;
+            }
+
+            if (leida.Find("Sweep") != null)
+            {
+                return; // 已经有了（重复跑建造工具时不要叠一层）
+            }
+
+            var sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Project/Resource/UI/Gesture/RadarSweep.png");
+            if (sprite == null)
+            {
+                Debug.LogWarning("[Boot] 找不到 RadarSweep.png（先跑一次玩法场景的建造工具生成手势贴图），雷达扫描没接上。");
+                return;
+            }
+
+            var sweepGo = new GameObject("Sweep", typeof(RectTransform), typeof(CanvasRenderer), typeof(UnityEngine.UI.Image));
+            sweepGo.transform.SetParent(leida, false);
+
+            var rect = (RectTransform)sweepGo.transform;
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            rect.localScale = Vector3.one;
+
+            var image = sweepGo.GetComponent<UnityEngine.UI.Image>();
+            image.sprite = sprite;
+            image.raycastTarget = false;
+            image.color = new Color(0.55f, 0.85f, 1f, 0.30f); // 和关卡的 idleColor 一致
+
+            var effects = sweepGo.AddComponent<Project.UI.BigApp.RadarEffects>();
+            var so = new SerializedObject(effects);
+            var sweepProp = so.FindProperty("sweep");
+            if (sweepProp != null)
+            {
+                sweepProp.objectReferenceValue = image;
+            }
+
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            Debug.Log("[Boot] MainUI 已接雷达扫描（扇形贴图 + RadarEffects，参数与关卡一致）。");
         }
 
         private static void OrderCanvas(RectTransform canvasRect, RectTransform roomRoot, RectTransform mainUi, RectTransform transitionRoot)

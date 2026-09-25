@@ -62,12 +62,51 @@ namespace Project.UI.BigApp
         // 顺序与 directionArrows 一致：上(0°) 下(180°) 左(270°) 右(90°)
         private readonly bool[] directionAvailable = new bool[4];
 
+        /// <summary>
+        /// 四个方向"那件事叫什么" ✓（拾取 / 丢弃 / 装备 / 检视 ✓），由 <see cref="InspectorDragHandler"/> 推过来 ✓。
+        /// 雷达扫到某个可用方向时 ✓，中心那行字就用它 ✓ —— 箭头只是亮一下 ✓，文字才说得清这是什么 ✓。
+        /// </summary>
+        private readonly string[] directionLabels = new string[4];
+
+        /// <summary>拖拽本身那条动作名 ✓（雷达没扫到任何箭头时，中心显示回它 ✓）。</summary>
+        private string baseActionText = string.Empty;
+
+        /// <summary>
+        /// 被雷达扫到的那条名字的**余晖** ✓（1 = 刚被扫到 ✓ → 慢慢减淡到 0 ✓）。
+        ///
+        /// 为什么做成减淡 ✗→✓：雷达前缘那颗红点是"亮着来、拖着尾巴淡出去"✓ ——
+        /// 中心那行字要是"扫过去就啪地消失"✗，就和雷达不是一个节奏了 ✓。
+        /// </summary>
+        private float sweptLabelAlpha;
+
+        /// <summary>有人请求过"收起"✓，但当时还有余晖没散尽 ✓ → 先记下 ✓，等 Update 里散尽再真正关 ✓。</summary>
+        private bool hideRequested;
+
+        /// <summary>
+        /// **拖拽那条动作名**（`baseActionText` ✓，比如「丢弃」✓）的亮度 ✓（1 = 正常显示 ✓）。
+        /// 和"雷达余晖"（`sweptLabelAlpha` ✓）是两个来源 ✓，取较亮的那个来画 ✓ ——
+        /// 收起时两个一起淡 ✓，所以"拖动结束"和"雷达扫过"都会慢慢消失 ✓，而不是各消失各的 ✗。
+        /// </summary>
+        private float labelAlpha = 1f;
+
+        [Tooltip("余晖散尽要几秒 ✓（越小消失越快 ✓）。")]
+        [SerializeField] private float sweptLabelDecay = 1.6f;
+
         /// <summary>四个方向现在能不能做（上/下/左/右），由 InspectorDragHandler 在选中物品时算好推过来。</summary>
         public void SetAvailableDirections(bool[] available)
         {
             for (var i = 0; i < directionAvailable.Length; i++)
             {
                 directionAvailable[i] = available != null && i < available.Length && available[i];
+            }
+        }
+
+        /// <summary>四个方向的名字 ✓（和 <see cref="SetAvailableDirections"/> 同顺序 ✓：上/下/左/右 ✓）。</summary>
+        public void SetDirectionLabels(string[] labels)
+        {
+            for (var i = 0; i < directionLabels.Length; i++)
+            {
+                directionLabels[i] = labels != null && i < labels.Length ? labels[i] : string.Empty;
             }
         }
 
@@ -97,9 +136,86 @@ namespace Project.UI.BigApp
                 }
 
                 var available = directionAvailable[i];
-                var swept = available && Mathf.Abs(Mathf.DeltaAngle(radar.SweepAngle, DirectionAngle(i))) <= sweepHitTolerance;
+                var swept = available && Mathf.Abs(Mathf.DeltaAngle(-radar.SweepAngle, DirectionAngle(i))) <= sweepHitTolerance;
                 arrow.color = !available ? arrowIdleColor : swept ? arrowSweptColor : arrowAvailableColor;
             }
+
+            // **雷达扫到哪个可用方向，就在中心把那件事的名字说出来** ✓ ——
+            // 箭头变色只持续一瞬 ✓，玩家未必看得清"这个方向是干什么的"✗；
+            // 中心那行字（`actionText` ✓）正好是空的 ✓，用它最合适 ✓。
+            if (actionText != null)
+            {
+                var sweptIndex = FindSweptDirection();
+                var sweptLabel = sweptIndex >= 0 ? directionLabels[sweptIndex] : null;
+
+                if (!string.IsNullOrEmpty(sweptLabel))
+                {
+                    // 刚被扫到：换成它的名字 ✓ 并点亮 ✓（接下来交给下面的余晖接管 ✓）。
+                    actionText.text = sweptLabel;
+                    sweptLabelAlpha = 1f;
+                }
+                else if (sweptLabelAlpha > 0f)
+                {
+                    // 扫过去了：**留着那行字慢慢减淡** ✓（和雷达前缘红点那条尾巴同一个节奏 ✓）。
+                    sweptLabelAlpha = Mathf.MoveTowards(sweptLabelAlpha, 0f,
+                        Time.unscaledDeltaTime / Mathf.Max(0.05f, sweptLabelDecay));
+
+                    if (sweptLabelAlpha <= 0f)
+                    {
+                        actionText.text = baseActionText; // 余晖散尽 → 回到拖拽那条动作名 ✓
+                    }
+                }
+                else
+                {
+                    actionText.text = baseActionText;
+                }
+
+                // **收到收起请求 → 两个来源一起淡** ✓（雷达余晖 ✓ + 拖拽动作名 ✓），
+                // 淡到 0 才真的清字 + 收起 ✓（收起的延后见 Hide() ✓）。
+                if (hideRequested)
+                {
+                    labelAlpha = Mathf.MoveTowards(labelAlpha, 0f,
+                        Time.unscaledDeltaTime / Mathf.Max(0.05f, sweptLabelDecay));
+
+                    if (labelAlpha <= 0f && sweptLabelAlpha <= 0f)
+                    {
+                        actionText.text = string.Empty;
+                        hideRequested = false;
+                        Hide(); // 此时两个 alpha 都是 0 ✓ → Hide 会真的关掉 ✓
+                        return;
+                    }
+                }
+
+                // 两条淡出各自独立 ✓，谁更暗听谁的 ✓（取较小值 ✓）：
+                //  ・雷达余晖（`sweptLabelAlpha` ✓）：扫过去之后自己往回走 ✓（不管有没有收起请求 ✓）；
+                //  ・收起请求（`labelAlpha` ✓）：只剩拖拽那条动作名时由它负责淡 ✓。
+                var alpha = Mathf.Min(
+                    sweptLabelAlpha > 0f ? sweptLabelAlpha : 1f,
+                    hideRequested ? labelAlpha : 1f);
+
+                var color = actionText.color;
+                color.a = alpha > 0f ? alpha : 1f;
+                actionText.color = color;
+            }
+        }
+
+        /// <summary>雷达此刻正扫在哪个**可用**方向上 ✓（没有就是 -1 ✓）。</summary>
+        private int FindSweptDirection()
+        {
+            for (var i = 0; i < directionArrows.Length; i++)
+            {
+                if (!directionAvailable[i])
+                {
+                    continue;
+                }
+
+                if (Mathf.Abs(Mathf.DeltaAngle(-radar.SweepAngle, DirectionAngle(i))) <= sweepHitTolerance)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
         }
 
         private static float DirectionAngle(int index)
@@ -140,7 +256,21 @@ namespace Project.UI.BigApp
 
             if (actionText != null)
             {
-                actionText.text = actionName ?? string.Empty;
+                baseActionText = actionName ?? string.Empty;
+
+                // **空名字时不许直接清字** ✗→✓：空闲状态（没拖拽）下 `Show(None, "")` 会被反复调用 ✓，
+                // 直接写就会把中心那行字**当场抹掉** ✗ —— 余晖根本没机会淡 ✓（实测就是"正常还是突然消失"✗）。
+                // 只有"确实有一条动作名"时才立刻写 ✓；空的时候交给 `Update` 的减淡去收尾 ✓。
+                if (!string.IsNullOrEmpty(baseActionText) || sweptLabelAlpha <= 0f)
+                {
+                    actionText.text = baseActionText;
+
+                    if (!string.IsNullOrEmpty(baseActionText))
+                    {
+                        labelAlpha = 1f;      // 新动作名进来了 → 重新点亮 ✓
+                        hideRequested = false; // 顺手撤掉还没做完的收起请求 ✓，否则新字一出现就顺着往下淡 ✗
+                    }
+                }
             }
 
             for (var i = 0; i < directionArrows.Length; i++)
@@ -174,7 +304,7 @@ namespace Project.UI.BigApp
                 // 于是弧线就像是被雷达"扫"出来的 —— 进度和扫描在视觉上是同一件事。
                 if (radar != null)
                 {
-                    ringFill.rectTransform.localEulerAngles = new Vector3(0f, 0f, -radar.SweepAngle);
+                    ringFill.rectTransform.localEulerAngles = new Vector3(0f, 0f, radar.SweepAngle);
                 }
             }
 
@@ -207,6 +337,18 @@ namespace Project.UI.BigApp
 
                 arrow.rectTransform.localScale = Vector3.one;
                 arrow.color = arrowIdleColor;
+            }
+
+            // **还有字没淡完就先别关** ✗→✓：中心那行字（`ActionText` ✓）和箭头 / 进度环**同住在 `Target` 里** ✓ ——
+            // 一关，`Update` 立刻不再执行 ✓（它开头就判 `!Target.activeSelf` ✓）→ 淡出永远跑不完 ✓ →
+            // 表现就是"啪地整块消失"✗（实测两种来源都撞过 ✓：雷达余晖 ✓、拖拽那条动作名 ✓）。
+            // 所以两个来源都算 ✓（取较亮的那个 ✓），只**记下请求** ✓，淡尽之后由 `Update` 真正关掉 ✓。
+            // 注意 `actionText` 没接上时**不许推迟** ✗：那时 `Update` 里整块淡出不会执行 ✓ →
+            // 亮度永远是 1 ✗ → 会永远收不回去（雷达环挂死在屏幕上 ✗）。
+            if (actionText != null && Mathf.Max(labelAlpha, sweptLabelAlpha) > 0.001f)
+            {
+                hideRequested = true;
+                return;
             }
 
             Target.SetActive(false);

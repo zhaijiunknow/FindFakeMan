@@ -26,6 +26,7 @@ namespace Project.UI.Scripts
             ClosePanel,      // PanelManager.ClosePanelByIdAsync(panelId)
             CloseTopPanel,      // PanelManager.CloseTopAsync()
             OpenWindow,         // 打开 SmallApp（主界面窗口）：SmallAppWindowController.OnOpen()
+            ShowSmallAppPage,   // 切到某个小软件分页：targetObject = 那一页（互斥切换交给 SmallAppPageHost ✓）
             HideSelfShowTarget, // 隐藏自身，显示 targetObject（如 start 显示 all_button）
             QuitGame,           // 退出游戏：编辑器退 Play 模式，打包后 Application.Quit()
             Start               // start 按钮：序章未完成播序章，完成后隐藏自身显示 targetObject(all_button)
@@ -90,6 +91,24 @@ namespace Project.UI.Scripts
                 case ActionType.OpenWindow:
                     FindObjectOfType<UIWindowManager>()?.Expand();
                     break;
+                case ActionType.ShowSmallAppPage:
+                {
+                    // 按钮上只写"我要去哪一页" ✓（targetObject = 那一页），
+                    // "把别的页关掉"这种互斥逻辑归 SmallAppPageHost ✓（ButtonAction 是单条动作，没有互斥组 ✗）。
+                    var host = targetObject != null
+                        ? targetObject.GetComponentInParent<Project.UI.BigApp.SmallAppPageHost>(true)
+                        : null;
+                    if (host != null)
+                    {
+                        host.ShowPage(targetObject);
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[ButtonAction] ShowSmallAppPage 找不到 SmallAppPageHost（targetObject={targetObject}）");
+                    }
+
+                    break;
+                }
                 case ActionType.HideSelfShowTarget:
                     gameObject.SetActive(false);
                     if (targetObject != null) targetObject.SetActive(true);

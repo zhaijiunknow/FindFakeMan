@@ -10,6 +10,12 @@ namespace Project.Core.Runtime.Framework
     {
         void ShowInspector(Item item, SimpleInteractable interactable);
         void HideInspector();
+
+        /// <summary>
+        /// **取消选中** ✓（右键 / 点空白处走它 ✓）：清掉当前目标 + 熄灭常驻描边 + 收起详情区 ✓。
+        /// 和 <see cref="HideInspector"/> 的区别 ✗：那个只是"收起面板"✓，选中的目标还留着 ✓。
+        /// </summary>
+        void ClearSelection();
         void ShowToolDrag(Sprite sprite, Vector2 position);
         void UpdateToolDrag(Vector2 position);
         void HideToolDrag();

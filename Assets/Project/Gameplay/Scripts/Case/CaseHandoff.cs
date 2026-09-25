@@ -28,6 +28,21 @@ namespace Project.Gameplay.Scripts.Case
         /// <summary>已经装备好的工具（没交接单时为空）。</summary>
         public static ToolItem[] Loadout { get; private set; } = new ToolItem[0];
 
+        /// <summary>
+        /// 序幕收屏那一刻，雷达扇形扫到的角度（度）。
+        /// 关卡第一帧把扇形放到同一个角度，于是面板内 CRT 收屏 → 展开的那一下，
+        /// 看起来就是**同一次旋转没断过** ✓。
+        /// 这个值**不随 <see cref="Clear"/> 清掉**：它只是一次视觉衔接，留着也不影响后面的对局。
+        /// </summary>
+        public static float RadarSweepAngle { get; private set; } = -1f;
+
+        /// <summary>序幕侧调用：记下当前雷达角度（要在切场景之前调）。</summary>
+        public static void PublishRadarAngle(float degrees)
+        {
+            RadarSweepAngle = degrees;
+            Debug.Log($"[Handoff] 记下序幕雷达角度 {degrees:0.#}°，关卡会从同一角度接着转。");
+        }
+
         /// <summary>序幕侧调用：把"这一关是固定的 + 带哪几件"写进交接单。</summary>
         public static void Publish(int seed, ToolItem[] loadout)
         {

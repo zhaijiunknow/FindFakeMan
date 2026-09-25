@@ -99,7 +99,9 @@ Canvas 1920×1080
   正常人局全部正常（玩家该读到"哪儿都没问题"再下「正常人」的结论）。
 - **门槛**：每件家具另有 `inspectionRequiredChance`（默认 25%）的概率要求**先点开检视**才能用工具。
 - **判定**：异常读数才算证据，凑够 `corroborationNeeded`（默认 2）条才算"互相印证"；
-  此时详情区里出现「是伪人 / 是正常人」，点下去 → 判对 `TriggerVictory`、判错 `TriggerGameOver`。
+  此时**打开左侧栏齿轮（小软件窗口）→「潜入」页（笔记）**里出现「是伪人 / 是正常人」，
+  点下去 → 判对 `TriggerVictory`、判错 `TriggerGameOver`。
+  （**不再**显示在 `nothink` 详情区里 —— 详情区只管"看单件东西"，证据进度与结论都归小软件 ✓。）
   **读数不够也允许交**（那是赌），结算文案会区分"证据互相印证"与"你赌对了"。
 - **结算**：结论交给 `GameLoopManager.ResolveCase(correct)`（判对 Victory / 判错 GameOver），
   然后 **`CaseResultPanel`**（建在 `Canvas/CaseResult`，界面是运行时搭的）自动盖上来：
@@ -225,6 +227,46 @@ layer.alphaHitTestMinimumThreshold = 0.5f;   // 只在 alpha ≥ 0.5 的像素�
 - 顺带的好处：拖拽时的"能不能用"提示（绿/红）也是查同一个 `CanUseTool`，所以门槛会自己教给玩家：
   没点开时拖过去是红的，点开后再拖就绿了。
 
+## 小软件窗口 = 控制台（笔记 / 线索 / 道具 / 设置 / 案件）
+
+玩法场景里还实例化了一份 `Assets/Project/UI/Prefabs/SmallApp.prefab`（`SmallAppUI`），
+它**自带 `UIWindowManager`**（`Expand`/`Collapse` + 淡入，`openedUIGroup` 已接好 ✓），
+所以建造工具只做三件事：实例化 → 建分页 → 接按钮。
+
+- **入口**：左侧栏 `setting_icon` → `ButtonAction.OpenWindow` → `FindObjectOfType<UIWindowManager>().Expand()`。
+  ⚠️ 因此"收起"**不能关节点** ✗（`FindObjectOfType` 不含未激活对象），建造工具只把 `openedUIGroup.alpha` 清 0 ✓。
+- **启动屏 → 菜单**：预制体自带启动屏（`OKAS`/`system`/`System_2`/`peopleicon` + 「进入系统」`start`），
+  点它才显示 `all_button` 菜单与默认页 —— 由 `SmallAppPageHost` 负责 ✓。
+- **分页**：预制体里那 6 个按钮**动作全是空的** ✗，`Content` 下面也**没有页面容器** ✗，
+  所以页面是建造工具新建的（`Page_笔记` / `Page_线索清单` / …），按钮由名字接线 ✓。
+
+| 按钮（预制体现有） | 页 | 内容 | 视图 |
+| --- | --- | --- | --- |
+| `潜入` | 笔记 | 观测列表 + `异常 n/m` + **是伪人 / 是正常人** | `CaseJournalView` |
+| `异常相册` | 线索清单 | 所有家具 + 已查/未查 | `CaseInfoPageView`(Checklist) |
+| `道具` | 道具 | 本局 4 件工具 + 耐久 + 说明 | `CaseInfoPageView`(Tools) |
+| `设置` | 设置 | 显示模式 / 主·音乐·人物音量 / 返回 | `SettingsPageView` + `VolumeBar` |
+| `系统备份` | 案件 | 案号 / 本局种子 / 进度 / 目标身份未知 | `CaseInfoPageView`(CaseInfo) |
+| `退出系统` | —— | 回主菜单（`OpeningCinematic`） | `SmallAppPageHost` |
+| `red` / `blue` | —— | 收起窗口 | 同上 |
+| `green` | —— | 切换全屏 | 同上 |
+
+`nothink` 只有"单件东西的详情 + 方向手势提示" ✓（证据进度、结论都不在这里 ✓）。
+
+## 序幕 → 关卡：让它看起来是"同一个窗口"
+
+三件事都走 `CaseHandoff`（静态交接单，跨场景传参 —— 序幕那边的 manager 是场景级的 ✗，挂不住跨场景数据）：
+
+| 交接什么 | 谁写 | 谁读 | 为什么 |
+| --- | --- | --- | --- |
+| **本局装备**（4 件工具） | 序幕 `ToolSlotIconsView`（填图标时顺手发布 ✓，发布的就是它显示的那份数组 ✓） | 关卡 `CaseDirector.BeginCase`（照抄，跳过随机少带 ✓） | 否则"序幕显示 4 件、进关卡换成另外 4 件"✗ |
+| **本局种子** | 同一处（`caseSeed`，默认 2052） | `CaseDirector.ResolveSeed`（优先于 `useFixedSeed` ✓） | 序幕这一关是**固定**的；主菜单进来才是随机 ✓ |
+| **雷达扫描角度** | `ProloguePerformanceDirector`（切场景前 `PublishRadarAngle` ✓） | 关卡的 `RadarEffects.OnEnable`（第一帧接上同一个角度 ✓） | 面板内 CRT 收屏 → 展开的那一下，扇形看起来是**同一次旋转没断过** ✓ |
+
+前提：**序幕里雷达要真的在扫** ✓ —— `BuildTerminalBootTransition.WireRadar` 给 `MainUI/BigApp/leida` 挂了
+`Sweep`（`RadarSweep.png` ✓，`leida` 自带 `Mask` 会裁进圆盘 ✓）+ `RadarEffects`（参数与关卡一致 ✓，
+两边 `sweepSpeed` 都用默认 55 ✓）。角度交接**不随 `Clear()` 清掉** ✓（只是一次视觉衔接，留着不影响后续对局 ✓）。
+
 ## 相关脚本
 
 | 文件 | 作用 |
@@ -239,6 +281,12 @@ layer.alphaHitTestMinimumThreshold = 0.5f;   // 只在 alpha ≥ 0.5 的像素�
 | `Gameplay/Scripts/Interactables/InteractableCloseUp.cs` | 家具的「特写切换」配置（只放数据：特写图 + 淡入淡出时长） |
 | `Gameplay/Scripts/Interactables/IInteractableHitProxy.cs` | 落点代理接口：盖住房间的整帧图（特写层）用它告诉工具拖拽"我代表哪件家具" |
 | `UI/Scripts/BigApp/RoomCloseUpView.cs` | 挂在 RoomView/CloseUp 上：按 HUD 的当前交互物淡入/淡出特写，并作为落点代理 |
+| `UI/Scripts/BigApp/SmallAppPageHost.cs` | 小软件的分页切换器：启动屏 →「进入系统」→ 菜单、页面切换、按钮选中态、退出/圆点（预制体里按钮动作是空的 ✗） |
+| `UI/Scripts/BigApp/CaseJournalView.cs` | 小软件「笔记」页：观测列表 + `异常 n/m` + 是伪人 / 是正常人 |
+| `UI/Scripts/BigApp/CaseInfoPageView.cs` | 小软件「线索清单 / 道具 / 案件」三页（一个组件三种模式） |
+| `UI/Scripts/BigApp/SettingsPageView.cs`、`VolumeBar.cs` | 小软件「设置」页（显示模式 + 三条音量 + 返回）+ 轻量音量条 |
+| `UI/Scripts/BigApp/CaseResultPanel.cs` | 结算界面：判定对错 / 真相 / 读数汇总 / 本局种子 + 再调查一次 / 结束调查 |
+| `UI/Scripts/BigApp/CaseJournalView.cs` 之外的 `VerdictPanelView.cs` | **已弃用**（结论原先挂在 `nothink`，现已搬到小软件笔记页）—— 可以连 `.meta` 一起删 |
 | `UI/Scripts/BigApp/SpriteOutline.cs` | 可选：按轮廓给 Image 生成染色描边副本（默认不挂，建议只在悬停时生成） |
 | `Gameplay/Editor/GenerateToolIcons.cs` | 代码生成物品图标：工具 5 张（工具包/紫外线灯/便携探测器/温度计/录音设备）+ 线索 3 张（水渍/头发/记录），并改写资产的 `icon`；菜单 `Tools/Project/Gameplay/Generate Item Icons` |
 | `Gameplay/Editor/BuildInvestigationScene.cs` | 上面的建造工具 |
@@ -251,7 +299,8 @@ layer.alphaHitTestMinimumThreshold = 0.5f;   // 只在 alpha ≥ 0.5 的像素�
   能用是因为 `Main.prefab` 把这些覆盖补上了。**要改窗口请改 `Main.prefab`，别只改 `BigApp.prefab`。**
 - `life` 那条 Slider 的 `Fill` 用的是竖向四颗心的素材，但填充方向是 Horizontal —— SAN 掉一格时是"从右往左切"而不是"整颗心熄灭"，
   想改就在 `Main.prefab → BigApp → box → life → Fill` 上把 Fill Method 改成 Vertical。
-- `GameState.GameOver` 没有结算界面。
+- ~~`GameState.GameOver` 没有结算界面~~ → **已有**：`CaseResultPanel`（`Canvas/CaseResult`，界面运行时搭 ✓），
+  交完结论自动盖上来，含「再调查一次 / 结束调查」✓。SAN 归零那条路仍是只有提示（没接结算面板 ✗）。
 - **详情区没有图标位**：`ItemDetailPanel.icon` 在 `BigApp.prefab` 和 `Main.prefab` 里都是空的
   （预制体只覆盖了 `nameText`/`descText`/`statusText`），而且 `nothink` 下只有 `Name`/`Desc`/`Status`
   三行文字、没有能放图的子物体。**所以线索图标现在只出现在收容格里**（`containmentIcons`），

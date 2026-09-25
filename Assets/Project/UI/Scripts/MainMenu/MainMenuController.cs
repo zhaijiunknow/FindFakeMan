@@ -218,7 +218,16 @@ namespace Project.UI.MainMenu
                 return;
             }
 
-            await sceneFlowManager.LoadSceneAsync(sceneName);
+            // 直接进**玩法关**时不走全屏 CRT ✗→✓。
+            // 全屏 CRT 是"整屏黑掉 → 加载 → 再亮起来"（0.8s + 1.0s），而玩法关的窗口本身是铺满画布的，
+            // 玩家从主菜单点「开始游戏/继续」时要看的就是那套 HUD 直接出现，中间再插一次全屏黑纯属倒退 ✗。
+            // 玩法关的入场观感交给它自己：序幕那条路走的是「面板内 CRT」（只在 game 板块里收屏，见 ProloguePerformanceDirector ✓）。
+            // 进别的场景（比如 Px2050_Prologue）仍然是全屏 CRT ✓。
+            var style = sceneName == gameplaySceneName
+                ? SceneTransitionStyle.None
+                : SceneTransitionStyle.FullScreenCrt;
+
+            await sceneFlowManager.LoadSceneAsync(sceneName, style);
         }
 
         private void RefreshContinueButton()

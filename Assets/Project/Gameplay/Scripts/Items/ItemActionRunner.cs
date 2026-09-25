@@ -22,9 +22,19 @@ namespace Project.Gameplay.Scripts.Items
             switch (kind)
             {
                 case ItemActionKind.Pickup:
-                    return interactable != null && interactable.IsActive && item != null;
+                    // **有选中家具就行** ✓（不要求 `hud.CurrentItem` 正好是那件东西 ✓ ——
+                    // 面板没开时它是 null ✓，但「这件家具身上有东西」仍然成立 ✓。兜底见 Pickup ✓）。
+                    return interactable != null && interactable.IsActive
+                           && (item != null || interactable.AssociatedItem != null);
                 case ItemActionKind.Discard:
-                    return item != null;
+                    // **只有"直接选中收容箱里的东西"才能丢** ✓ —— 判定就是 `interactable == null`：
+                    // 收容格 / 工具槽走的是 `ShowInspector(item, null)` ✓，家具走的是 `(item, interactable)` ✓。
+                    //
+                    // 为什么必须这么判 ✗→✓：选中家具时 `hud.CurrentItem` 可能是**刚从它身上收进箱子的那件收容物** ✓，
+                    // 而它此时**确实在箱子里** ✗ → 只判"在不在箱子里"就会让家具也亮出「↓丢弃」✗，
+                    // 一下就能把刚收走的东西扔掉 ✗（玩家此刻的意图明明是"看这件家具"✓）。
+                    // 工具槽里的工具也不满足 ✓（它们不在箱子里 ✓，要放回背包走「←装备」那个开关 ✓）。
+                    return interactable == null && item != null && IsItemInContainment(item);
                 case ItemActionKind.Inspect:
                     return interactable != null || item != null;
                 case ItemActionKind.Equip:
@@ -56,7 +66,26 @@ namespace Project.Gameplay.Scripts.Items
 
         private static bool Pickup(Item item, SimpleInteractable interactable)
         {
-            if (interactable == null || !interactable.IsActive || item == null)
+            if (interactable == null || !interactable.IsActive)
+            {
+                ShowHint("这里没有可以拾取的东西。", true);
+                return false;
+            }
+
+            // 谁说了算 ✓：**交互物自己的东西优先** ✓ ——
+            // 关了面板之后 `hud.CurrentItem` 会**留着上一次的东西** ✓（选中状态要持续 ✓），
+            // 那件东西可能已经被拾取走了 ✗；而交互物身上的 `AssociatedItem` 在拾取时已被清空 ✓，
+            // 所以以它为准就不会"同一件收容物被重复收两次"✗。没有规则的老交互物才退回用传进来的 item ✓。
+            if (interactable.GetComponent<SampleInteractableRule>() != null)
+            {
+                item = interactable.AssociatedItem;
+            }
+            else
+            {
+                item ??= interactable.AssociatedItem;
+            }
+
+            if (item == null)
             {
                 ShowHint("这里没有可以拾取的东西。", true);
                 return false;
@@ -70,8 +99,13 @@ namespace Project.Gameplay.Scripts.Items
 
             if (item is ClueItem clue)
             {
-                // 异常线索（requiresContainment）进收容箱，其余进背包 —— 设计表 §2.2。
-                var toContainment = clue.RequiresContainment || clue.IsAnomaly;
+                // 进不进收容箱**问产地规则** ✓ —— 见 Docs/ContainmentRules.md §1：
+                // 异常收容物和正常收容物**都能收容** ✓，所以不能按 clue.IsAnomaly 判 ✗
+                //（那会把正常收容物塞进背包 ✗）。只有场景里烘死规则的老交互物才退回老判断 ✓。
+                var rule = interactable.GetComponent<SampleInteractableRule>();
+                var toContainment = rule != null
+                    ? rule.CollectsToContainment
+                    : clue.RequiresContainment || clue.IsAnomaly;
                 if (toContainment && inventory.IsContainmentFull())
                 {
                     ShowHint("收容箱满了，先处理掉一些东西。", true);
@@ -103,8 +137,23 @@ namespace Project.Gameplay.Scripts.Items
             }
 
             interactable.SetCollected();
+
+            // 拿过就**再也不给** ✓ —— 丢弃之后同样找不回来 ✓（把产地手上那件清掉 ✓）。
+            interactable.GetComponent<SampleInteractableRule>()?.MarkClueTaken();
+
             PlaySfx("item_pickup");
             return true;
+        }
+
+        /// <summary>
+        /// 这件东西现在是不是在**收容箱**里 ✓ —— 丢弃的资格就等于「它在箱子里」✓。
+        /// 工具槽里那些**不在**箱子里 ✓，所以它们不会亮出「↓丢弃」✓（它们走「←装备」那个开关 ✓）。
+        /// </summary>
+        private static bool IsItemInContainment(Item item)
+        {
+            return item != null
+                   && Services.TryGet<InventoryManager>(out var inventory)
+                   && inventory.IsInContainment(item.ItemId);
         }
 
         // ---- 丢弃：异常线索扣 SAN（设计表 §2.2）----
@@ -114,6 +163,15 @@ namespace Project.Gameplay.Scripts.Items
             if (item == null)
             {
                 ShowHint("手上没有东西可以丢。", true);
+                return false;
+            }
+
+            // 只有**收容箱里**的东西能丢 ✓ —— 而且这条不只是"体验"✓：
+            // 下面那句 `RemoveItem` 会把物品从**所有**列表里删掉 ✗，
+            // 万一是从工具槽走过来的 ✓，工具（含耐久）会被直接销毁 ✗。所以这里必须挡住 ✓。
+            if (!IsItemInContainment(item))
+            {
+                ShowHint($"{item.DisplayName} 不在收容箱里 —— 只有收容物能丢弃。", true);
                 return false;
             }
 
@@ -153,7 +211,7 @@ namespace Project.Gameplay.Scripts.Items
             return true;
         }
 
-        // ---- 装备：工具进装备栏 ----
+        // ---- 装备：背包 ↔ 工具包的**开关**（同一个方向动作，两边都能调 ✓）----
 
         private static bool Equip(Item item)
         {
@@ -169,18 +227,34 @@ namespace Project.Gameplay.Scripts.Items
                 return false;
             }
 
-            // 找一个空槽（装备栏容量 3）。
+            // 已经在工具包里 → 这一次「装备」的意思就是**放回背包** ✓（**不是销毁** ✗）。
+            // 做成开关的理由 ✓：背包↔工具包只需要一个方向动作 ✓，
+            // 道具页每行一个按钮、HUD 里左拖一下，调的也都是这同一个 toggle ✓。
             for (var slot = 0; slot < inventory.EquipmentCapacity; slot++)
             {
-                if (inventory.GetEquippedTool(slot) == null)
+                if (!ReferenceEquals(inventory.GetEquippedTool(slot), tool))
                 {
-                    inventory.EquipTool(tool, slot);
-                    ShowHint($"已装备：{tool.DisplayName}（槽位 {slot + 1}）", false);
+                    continue;
+                }
+
+                if (inventory.MoveToBackpack(tool))
+                {
+                    ShowHint($"已放回背包：{tool.DisplayName} ✓", false);
                     return true;
                 }
+
+                ShowHint("放不回背包。", true);
+                return false;
             }
 
-            ShowHint("装备栏满了。", true);
+            // 不在工具包里 → 从背包装上来 ✓（`MoveToToolBag` 会顺手把它从背包里拿掉 ✓）。
+            if (inventory.MoveToToolBag(tool))
+            {
+                ShowHint($"已装进工具包：{tool.DisplayName} ✓", false);
+                return true;
+            }
+
+            ShowHint("工具包满了 —— 先放回去一件，或者直接换另一件。", true);
             return false;
         }
 

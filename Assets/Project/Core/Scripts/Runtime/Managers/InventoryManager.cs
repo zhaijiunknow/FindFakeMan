@@ -17,6 +17,10 @@ namespace Project.Core.Runtime.Managers
         private readonly List<Item> inventoryItems = new();
         private readonly List<Item> containmentItems = new();
         private readonly List<Item> equippedTools = new();
+
+        // 背包 = 本局的**可用池**（道具页左列 ✓）：想换就打开道具页换 ✓，工具包只有 4 格 ✓。
+        // 和 inventoryItems（随身携带的**非工具**物品 ✓，比如【李阳的手表】）分开 ✗ —— 两者语义不同 ✓。
+        private readonly List<Item> backpackItems = new();
         private IReadOnlyList<Item> itemSource = System.Array.Empty<Item>();
 
         public int InventoryCapacity => inventoryCapacity;
@@ -28,6 +32,13 @@ namespace Project.Core.Runtime.Managers
         {
             itemSource = source?.ToArray() ?? System.Array.Empty<Item>();
         }
+
+        /// <summary>
+        /// 全局 Item 列表（只读）✓。
+        /// 给案情用：<c>CaseDirector</c> 开局要按 id 把那几件收容物挂到固定产出点上 ✓，
+        /// 有了这个出口它就不用再在 Inspector 里连一遍引用 ✓（少一处会漏连的地方 ✓）。
+        /// </summary>
+        public IReadOnlyList<Item> ItemSource => itemSource;
 
         public async UniTask Initialize()
         {
@@ -81,6 +92,106 @@ namespace Project.Core.Runtime.Managers
         public IReadOnlyList<Item> GetEquippedTools() => equippedTools;
         public Item GetEquippedTool(int slotIndex) =>
             slotIndex >= 0 && slotIndex < equippedTools.Count ? equippedTools[slotIndex] : null;
+
+        // ---------- 背包（本局可用池）↔ 工具包（随身 4 格）----------
+
+        /// <summary>
+        /// 开局把本局可用的**整池**工具放进背包 ✓ —— bootstrapper 会喂 `CaseDirector.LoadoutPool` ✓
+        ///（5 件 ✓），而工具包里只装案情那一套（4 件 ✓）：于是"带哪几件进去"变成玩家的选择 ✓，
+        /// 剧情里念的"5 件装备"也因此成立 ✓（见 Docs/ContainmentRules.md §6 ✓）。
+        /// </summary>
+        public void SetBackpackItems(IEnumerable<Item> items)
+        {
+            backpackItems.Clear();
+            if (items == null)
+            {
+                return;
+            }
+
+            foreach (var item in items)
+            {
+                if (item != null && !backpackItems.Contains(item))
+                {
+                    backpackItems.Add(item);
+                }
+            }
+        }
+
+        public IReadOnlyList<Item> GetBackpackItems() => backpackItems;
+
+        /// <summary>背包 → 工具包 ✓（找空槽装 ✓）。成功时会顺手把它从背包里拿掉 ✓。</summary>
+        public bool MoveToToolBag(Item item)
+        {
+            if (item == null)
+            {
+                return false;
+            }
+
+            for (var slot = 0; slot < equipmentCapacity; slot++)
+            {
+                if (GetEquippedTool(slot) != null)
+                {
+                    continue;
+                }
+
+                if (!EquipTool(item as ToolItem, slot))
+                {
+                    return false;
+                }
+
+                backpackItems.Remove(item);
+                PushToolBagToToolInput();
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 工具包 → 背包 ✓ —— **不是销毁** ✗：`RemoveItem`（丢弃那条）会把它从所有列表删干净 ✗，
+        /// 而"放回去"只是回到背包 ✓，随时能再拿 ✓。
+        /// </summary>
+        public bool MoveToBackpack(Item item)
+        {
+            if (item == null || !equippedTools.Remove(item))
+            {
+                return false;
+            }
+
+            if (!backpackItems.Contains(item))
+            {
+                backpackItems.Add(item);
+            }
+
+            PushToolBagToToolInput();
+
+            Services.TryGet<UIManager>(out var uiManager);
+            uiManager?.UpdateEquipmentSlots();
+            return true;
+        }
+
+        /// <summary>
+        /// 把"工具包里这套"推给工具条 ✓ —— 工具条是**已装备工具的视图** ✓，
+        /// 背包↔工具包换完之后不推一次的话 ✗，HUD 底部那 4 格和拖拽用的还是旧那套 ✗（看起来像"换了没用"✗）。
+        /// </summary>
+        private void PushToolBagToToolInput()
+        {
+            if (!Services.TryGet<IToolInputService>(out var toolInput))
+            {
+                return;
+            }
+
+            var belt = new List<ToolItem>();
+            for (var slot = 0; slot < equipmentCapacity; slot++)
+            {
+                if (GetEquippedTool(slot) is ToolItem tool)
+                {
+                    belt.Add(tool);
+                }
+            }
+
+            toolInput.SetTools(belt);
+        }
 
         // ---------- id 查询（存档/外部兼容） ----------
         public IReadOnlyList<string> GetInventoryItemIds() => inventoryItems.Where(i => i != null).Select(i => i.ItemId).ToList();

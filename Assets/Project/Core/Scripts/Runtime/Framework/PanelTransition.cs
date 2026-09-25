@@ -104,7 +104,7 @@ namespace Project.Core.Runtime.Framework
         private static RectTransform FindHost()
         {
             RectTransform fallback = null;
-            foreach (var rect in UnityEngine.Object.FindObjectsByType<RectTransform>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            foreach (var rect in UnityEngine.Object.FindObjectsByType<RectTransform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
                 if (rect.name != HostName)
                 {
@@ -204,7 +204,14 @@ namespace Project.Core.Runtime.Framework
             {
                 var image = CreateImage(parent, name, Color.black);
                 var rect = image.rectTransform;
-                rect.anchorMin = rect.anchorMax = anchor;
+
+                // 横向**拉满**（左右锚点 0→1 ✓），纵向用点锚点：
+                // SetBars 只设 height（sizeDelta.x 恒为 0 ✓）—— 如果这里是点锚点，sizeDelta 就是"绝对宽高" ✗，
+                // 宽度 0 的两条黑会**永远看不见** ✗（白线是拉伸锚点所以看得见 ✓，之前就是这个差异 ✗）。
+                rect.anchorMin = new Vector2(0f, anchor.y);
+                rect.anchorMax = new Vector2(1f, anchor.y);
+
+                // pivot.x 用 0.5 ✓（锚点也是 0.5 ✓），pivot.y 跟锚点走 → 上条往下长、下条往上长 ✓。
                 rect.pivot = anchor;
                 rect.anchoredPosition = Vector2.zero;
                 rect.sizeDelta = Vector2.zero;

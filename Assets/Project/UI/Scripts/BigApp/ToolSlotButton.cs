@@ -40,6 +40,15 @@ namespace Project.UI.BigApp
             }
 
             var tool = inventory.GetEquippedTool(slotIndex);
+            // 和收容格同理 ✓：必须走 HUD 正门 ✓（它会设 InvestigationHudView.CurrentItem ✓），
+            // 只调 detail.ShowItem 的话方向体感（左装备 / 右检视 ✓）看不到这个道具 ✗。
+            var hud = GetComponentInParent<InvestigationHudView>(true);
+            if (hud != null)
+            {
+                hud.ShowInspector(tool, null);
+                return;
+            }
+
             detail?.ShowItem(tool);
         }
     }
